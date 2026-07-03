@@ -39,6 +39,34 @@ Flags
 
 --cpu_type (Options: TIMING, ATOMIC, KVM, default: TIMING)
 
+# Compiling C programs for execution
+To run a C program under gem5, first build it as an ARM64 Linux binary.
+
+Example using the sample source in src/tests/test_sample.c:
+
+```bash
+cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
+
+aarch64-linux-gnu-gcc -static -O2 -o tests/test_sample_arm64 tests/test_sample.c
+```
+
+This produces an executable named tests/test_sample_arm64 that can be run with the provided script:
+
+```bash
+cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
+/home/kevin/Projects/gem5_projects/gem5/build/ARM/gem5.opt main.py \
+  --binary tests/test_sample_arm64
+```
+
+If your system does not have aarch64-linux-gnu-gcc installed, try:
+
+```bash
+clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -static -O2 \
+  -o tests/test_sample_arm64 tests/test_sample.c
+```
+
+Tip: use the -static flag when possible so the binary is easier to run in gem5's SE mode.
+
 # Running benchmarks example 
 # HPCCG 
 /path/to/gem5/build/ARM/gem5.opt \
