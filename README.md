@@ -9,6 +9,9 @@ This project builds a custom three-level cache hierarchy for gem5 and attaches s
 - Attaches power models to each cache level during simulation setup
 - Runs a user-specified ARM64 Linux binary through [src/main.py](src/main.py)
 
+# Cache Hierarchy Block Diagram
+![Alt text](/images/Cache_Hierarchy.png)
+
 ## Project structure
 
 - [src/main.py](src/main.py) — command-line entrypoint for launching gem5 simulations
