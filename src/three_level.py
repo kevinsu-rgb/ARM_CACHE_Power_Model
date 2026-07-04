@@ -3,17 +3,13 @@ This module contains a three-level cache hierarchy with private L1 caches,
 private L2 caches, and a shared L3 cache.
 """
 
+from m5.objects import PowerModel, MathExprPowerModel
 from gem5.components.boards.abstract_board import AbstractBoard
 from gem5.components.cachehierarchies.classic.abstract_classic_cache_hierarchy import (
     AbstractClassicCacheHierarchy,
 )
 
-#from gem5.components.cachehierarchies.classic.caches.l1dcache import L1DCache
-#from gem5.components.cachehierarchies.classic.caches.l1icache import L1ICache
-#from gem5.components.cachehierarchies.classic.caches.l2cache import L2Cache
-from m5.objects import LRURP, FIFORP, TreePLRURP
-
-from gem5.isas import ISA
+from m5.objects import LRURP
 
 from m5.objects import (
     BadAddr,
@@ -24,11 +20,9 @@ from m5.objects import (
 )
 
 from m5.util.convert import toMemorySize
-from m5.params import *
 
 
 class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
-
     def __init__(
         self,
         l1d_size,
@@ -47,7 +41,6 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
         # l1i_block_size=64,
         # l2_block_size=64,
         # l3_block_size=64,
-
     ):
         AbstractClassicCacheHierarchy.__init__(self)
 
@@ -108,7 +101,11 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
             for core in board.get_processor().get_cores()
         ]
 
-        self.l3_cache = L3Cache(size=self._l3_size, assoc=self._l3_assoc, replacement_policy=self._l3_replacement_policy)
+        self.l3_cache = L3Cache(
+            size=self._l3_size,
+            assoc=self._l3_assoc,
+            replacement_policy=self._l3_replacement_policy,
+        )
 
         # Connect the L3 cache to the system crossbar and L3 crossbar
         self.l3_cache.mem_side = self.membus.cpu_side_ports
@@ -123,9 +120,21 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
         """
         cluster = SubSystem()
 
-        cluster.l1dcache = L1Cache(size=self._l1d_size, assoc=self._l1d_assoc, replacement_policy=self._l1d_replacement_policy)
-        cluster.l1icache = L1Cache(size=self._l1i_size, assoc=self._l1i_assoc, replacement_policy=self._l1i_replacement_policy)
-        cluster.l2cache = L2Cache(size=self._l2_size, assoc=self._l2_assoc, replacement_policy=self._l2_replacement_policy)
+        cluster.l1dcache = L1Cache(
+            size=self._l1d_size,
+            assoc=self._l1d_assoc,
+            replacement_policy=self._l1d_replacement_policy,
+        )
+        cluster.l1icache = L1Cache(
+            size=self._l1i_size,
+            assoc=self._l1i_assoc,
+            replacement_policy=self._l1i_replacement_policy,
+        )
+        cluster.l2cache = L2Cache(
+            size=self._l2_size,
+            assoc=self._l2_assoc,
+            replacement_policy=self._l2_replacement_policy,
+        )
 
         cluster.l2_bus = L2XBar()
 
@@ -141,12 +150,7 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
 
         cluster.l2cache.mem_side = l3_bus.cpu_side_ports
 
-        if isa == ISA.X86:
-            int_req_port = self.membus.mem_side_ports
-            int_resp_port = self.membus.cpu_side_ports
-            core.connect_interrupt(int_req_port, int_resp_port)
-        else:
-            core.connect_interrupt()
+        core.connect_interrupt()
 
         return cluster
 
@@ -169,34 +173,28 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
         """called after preinstantiate"""
 
         self.l3_cache.power_state.default_state = "ON"
-        self.l3_cache.power_model = L3PowerModel(
-            self.l3_cache.path(),
-            self._l3_size
-        )
+        self.l3_cache.power_model = L3PowerModel(self.l3_cache.path(), self._l3_size)
 
         # L1/L2 for every core cluster
         for cluster in self.clusters:
-
             # --- L1I ---
             cluster.l1icache.power_state.default_state = "ON"
             cluster.l1icache.power_model = L1PowerModel(
-                cluster.l1icache.path(),
-                self._l1i_size
+                cluster.l1icache.path(), self._l1i_size
             )
 
             # --- L1D ---
             cluster.l1dcache.power_state.default_state = "ON"
             cluster.l1dcache.power_model = L1PowerModel(
-                cluster.l1dcache.path(),
-                self._l1d_size
+                cluster.l1dcache.path(), self._l1d_size
             )
 
             # --- L2 ---
             cluster.l2cache.power_state.default_state = "ON"
             cluster.l2cache.power_model = L2PowerModel(
-                cluster.l2cache.path(),
-                self._l2_size
+                cluster.l2cache.path(), self._l2_size
             )
+
 
 # Configured latency similar to ARM Cortex A55
 class L1Cache(Cache):
@@ -213,6 +211,7 @@ class L1Cache(Cache):
         self.writeback_clean = False
         self.clusivity = "mostly_incl"
 
+
 class L2Cache(Cache):
     def __init__(self, size, assoc, replacement_policy):
         super().__init__()
@@ -226,6 +225,7 @@ class L2Cache(Cache):
         self.tgts_per_mshr = 8
         self.writeback_clean = False
         self.clusivity = "mostly_incl"
+
 
 class L3Cache(Cache):
     def __init__(self, size, assoc, replacement_policy):
@@ -241,7 +241,6 @@ class L3Cache(Cache):
         self.writeback_clean = False
         self.clusivity = "mostly_incl"
 
-from m5.objects import PowerModel, MathExprPowerModel
 
 # L3 Cache Power Class Definitions
 class L3PowerOn(MathExprPowerModel):
@@ -254,10 +253,11 @@ class L3PowerOn(MathExprPowerModel):
         self.dyn = (
             f"({l3_path}.overallAccesses * 0.000_000_000_080 + "
             f"{l3_path}.overallMisses * 0.000_000_000_240) / (simSeconds)"
-        )        
+        )
         size_bytes = toMemorySize(size)
         print(size_bytes)
         self.st = f"{size_bytes} * 5 / 1000000000000"  # 5 pW per byte
+
 
 class L3PowerClkGated(MathExprPowerModel):
     def __init__(self, size, **kwargs):
@@ -267,6 +267,7 @@ class L3PowerClkGated(MathExprPowerModel):
         self.dyn = "0"
         self.st = f"({size_bytes} * {gated_fraction} * 5 / 1000000000000)"
 
+
 class L3PowerSRAMRetention(MathExprPowerModel):
     def __init__(self, size, **kwargs):
         super().__init__(**kwargs)
@@ -275,9 +276,11 @@ class L3PowerSRAMRetention(MathExprPowerModel):
         self.dyn = "0"
         self.st = f"({size_bytes} * {retention_fraction} * 5 / 1000000000000)"
 
+
 class L3PowerOff(MathExprPowerModel):
     dyn = "0"
     st = "0"
+
 
 # L2 Cache Power Class Definitions
 class L2PowerOn(MathExprPowerModel):
@@ -289,10 +292,11 @@ class L2PowerOn(MathExprPowerModel):
         self.dyn = (
             f"({l2_path}.overallAccesses * 0.000_000_000_060 + "
             f"{l2_path}.overallMisses * 0.000_000_000_180) / (simSeconds)"
-        )        
+        )
         size_bytes = toMemorySize(size)
         print(size_bytes)
         self.st = f"{size_bytes} * 4 / 1000000000000"  # 4 pW per byte
+
 
 class L2PowerClkGated(MathExprPowerModel):
     def __init__(self, size, **kwargs):
@@ -302,6 +306,7 @@ class L2PowerClkGated(MathExprPowerModel):
         self.dyn = "0"
         self.st = f"({size_bytes} * {gated_fraction} * 4 / 1000000000000)"
 
+
 class L2PowerSRAMRetention(MathExprPowerModel):
     def __init__(self, size, **kwargs):
         super().__init__(**kwargs)
@@ -310,9 +315,11 @@ class L2PowerSRAMRetention(MathExprPowerModel):
         self.dyn = "0"
         self.st = f"({size_bytes} * {retention_fraction} * 4/ 1000000000000)"
 
+
 class L2PowerOff(MathExprPowerModel):
     dyn = "0"
     st = "0"
+
 
 # L1 Cache Power Class Definitions
 class L1PowerOn(MathExprPowerModel):
@@ -324,10 +331,11 @@ class L1PowerOn(MathExprPowerModel):
         self.dyn = (
             f"({l1_path}.overallAccesses * 0.000_000_000_012 + "
             f"{l1_path}.overallMisses * 0.000_000_000_045) / (simSeconds)"
-        )        
+        )
         size_bytes = toMemorySize(size)
         print(size_bytes)
         self.st = f"{size_bytes} * 3 / 1000000000000"  # 3 pW per byte
+
 
 class L1PowerClkGated(MathExprPowerModel):
     def __init__(self, size, **kwargs):
@@ -337,6 +345,7 @@ class L1PowerClkGated(MathExprPowerModel):
         self.dyn = "0"
         self.st = f"({size_bytes} * {gated_fraction} * 3/ 1000000000000)"
 
+
 class L1PowerSRAMRetention(MathExprPowerModel):
     def __init__(self, size, **kwargs):
         super().__init__(**kwargs)
@@ -345,9 +354,11 @@ class L1PowerSRAMRetention(MathExprPowerModel):
         self.dyn = "0"
         self.st = f"({size_bytes} * {retention_fraction} * 3 / 1000000000000)"
 
+
 class L1PowerOff(MathExprPowerModel):
     dyn = "0"
     st = "0"
+
 
 class L3PowerModel(PowerModel):
     def __init__(self, l3_path, size, **kwargs):
@@ -360,6 +371,7 @@ class L3PowerModel(PowerModel):
             L3PowerOff(),  # OFF
         ]
 
+
 class L2PowerModel(PowerModel):
     def __init__(self, l2_path, size, **kwargs):
         super().__init__(**kwargs)
@@ -370,6 +382,7 @@ class L2PowerModel(PowerModel):
             L2PowerSRAMRetention(size),  # SRAM_RETENTION
             L2PowerOff(),  # OFF
         ]
+
 
 class L1PowerModel(PowerModel):
     def __init__(self, l1_path, size, **kwargs):

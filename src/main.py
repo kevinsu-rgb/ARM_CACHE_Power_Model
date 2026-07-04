@@ -1,4 +1,3 @@
-
 import argparse
 
 from three_level import PrivateL1PrivateL2SharedL3CacheHierarchy
@@ -41,8 +40,8 @@ parser.add_argument("--l3_replacement_policy", type=str, default="LRURP")
 parser.add_argument(
     "--cpu_type",
     type=str,
-    default="TIMING",
-    choices=["TIMING", "ATOMIC", "KVM"],
+    default="DerivO3CPU",
+    choices=["DerivO3CPU", "TIMING", "ATOMIC", "KVM"],
 )
 
 args = parser.parse_args()
@@ -57,41 +56,41 @@ l1d_policy = LRURP()
 l2_policy = LRURP()
 l3_policy = LRURP()
 
-if(args.l1i_replacement_policy == "LRURP"):
+if args.l1i_replacement_policy == "LRURP":
     l1i_policy = LRURP()
-elif(args.l1i_replacement_policy == "FIFORP"):
+elif args.l1i_replacement_policy == "FIFORP":
     l1i_policy = FIFORP()
-elif(args.l1i_replacement_policy == "TreePLRURP"):
+elif args.l1i_replacement_policy == "TreePLRURP":
     l1i_policy = TreePLRURP()
 else:
     print("Invalid policy for l1i cache, default to LRURP")
     l1i_policy = LRURP()
 
-if(args.l1d_replacement_policy == "LRURP"):
+if args.l1d_replacement_policy == "LRURP":
     l1d_policy = LRURP()
-elif(args.l1d_replacement_policy == "FIFORP"):
+elif args.l1d_replacement_policy == "FIFORP":
     l1d_policy = FIFORP()
-elif(args.l1d_replacement_policy == "TreePLRURP"):
+elif args.l1d_replacement_policy == "TreePLRURP":
     l1d_policy = TreePLRURP()
 else:
     print("Invalid policy for l1d cache, default to LRURP")
     l1d_policy = LRURP()
 
-if(args.l2_replacement_policy == "LRURP"):
+if args.l2_replacement_policy == "LRURP":
     l2_policy = LRURP()
-elif(args.l2_replacement_policy == "FIFORP"):
+elif args.l2_replacement_policy == "FIFORP":
     l2_policy = FIFORP()
-elif(args.l2_replacement_policy == "TreePLRURP"):
+elif args.l2_replacement_policy == "TreePLRURP":
     l2_policy = TreePLRURP()
 else:
     print("Invalid policy for l2 cache, default to LRURP")
     l2_policy = LRURP()
 
-if(args.l3_replacement_policy == "LRURP"):
+if args.l3_replacement_policy == "LRURP":
     l3_policy = LRURP()
-elif(args.l3_replacement_policy == "FIFORP"):
+elif args.l3_replacement_policy == "FIFORP":
     l3_policy = FIFORP()
-elif(args.l3_replacement_policy == "TreePLRURP"):
+elif args.l3_replacement_policy == "TreePLRURP":
     l3_policy = TreePLRURP()
 else:
     print("Invalid policy for l3 cache, default to LRURP")
@@ -125,7 +124,6 @@ board = SimpleBoard(
         l1i_replacement_policy=l1i_policy,
         l2_replacement_policy=l2_policy,
         l3_replacement_policy=l3_policy,
-
         # l1d_block_size=args.l1d_block_size,
         # l1i_block_size=args.l1i_block_size,
         # l2_block_size=args.l2_block_size,
@@ -145,14 +143,22 @@ print("\n===== Simulation Configuration =====")
 print(f"Binary: {binary.get_local_path()}")
 
 print("\n--- Cache Configuration ---")
-print(f"L1I: size={args.l1i_size}, assoc={args.l1i_assoc}, "
-      f"replacement={args.l1i_replacement_policy}")
-print(f"L1D: size={args.l1d_size}, assoc={args.l1d_assoc}, "
-      f"replacement={args.l1d_replacement_policy}")
-print(f"L2:  size={args.l2_size}, assoc={args.l2_assoc}, "
-      f"replacement={args.l2_replacement_policy}")
-print(f"L3:  size={args.l3_size}, assoc={args.l3_assoc}, "
-      f"replacement={args.l3_replacement_policy}")
+print(
+    f"L1I: size={args.l1i_size}, assoc={args.l1i_assoc}, "
+    f"replacement={args.l1i_replacement_policy}"
+)
+print(
+    f"L1D: size={args.l1d_size}, assoc={args.l1d_assoc}, "
+    f"replacement={args.l1d_replacement_policy}"
+)
+print(
+    f"L2:  size={args.l2_size}, assoc={args.l2_assoc}, "
+    f"replacement={args.l2_replacement_policy}"
+)
+print(
+    f"L3:  size={args.l3_size}, assoc={args.l3_assoc}, "
+    f"replacement={args.l3_replacement_policy}"
+)
 print(f"Block size: {args.block_size} bytes")
 
 print("\n--- CPU Configuration ---")
@@ -183,6 +189,7 @@ def patched_pre_instantiate(*args, **kwargs):
     board.get_cache_hierarchy().add_power_model()
     print("Power model added successfully!")
     return root
+
 
 # Replace the board's method
 board._pre_instantiate = patched_pre_instantiate

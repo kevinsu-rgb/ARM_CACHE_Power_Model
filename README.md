@@ -66,30 +66,3 @@ clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -static -O2 \
 ```
 
 Tip: use the -static flag when possible so the binary is easier to run in gem5's SE mode.
-
-# Running benchmarks example 
-# HPCCG 
-/path/to/gem5/build/ARM/gem5.opt \
-  /path/to/gem5/configs/example/se.py \
-  -c /home/bohan/gem5-bench/hpccg/hpccg.elf \
-  --options="128 128 128" \
-  --cwd=/home/bohan/gem5-bench/hpccg \
-  --caches --l2cache
-
-
-# heat_equation 
-
-/path/to/gem5/build/ARM/gem5.opt \
-  /path/to/gem5/configs/example/se.py \
-  -c /path/to/heat2d.elf \
-  --options="256 256 200" \
-  --caches --l2cache
-    --caches --l2cache
-
-# blacksholes 
-
-/path/to/gem5/build/ARM/gem5.opt \
-  /path/to/gem5/configs/example/se.py \
-  -c /home/bohan/gem5-bench/blackscholes/blackscholes.elf \
-  --options="bs_input.txt bs_output.txt" \
-    --caches --l2cache
