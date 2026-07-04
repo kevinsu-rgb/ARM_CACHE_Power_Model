@@ -2,8 +2,10 @@
 import argparse
 import csv
 
+
 def get_stat(stats, name):
     return stats.get(name, 0)
+
 
 def get_total_counter(stats, base):
     """
@@ -12,6 +14,7 @@ def get_total_counter(stats, base):
     if f"{base}::total" in stats:
         return stats[f"{base}::total"]
     return stats.get(base, 0)
+
 
 def parse_stats_file(path):
     """
@@ -57,10 +60,12 @@ def parse_stats_file(path):
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--stats", type=str, default="m5out/stats.txt",
-                        help="Path to gem5 stats.txt")
-    parser.add_argument("--out", type=str, default="filtered_stats.csv",
-                        help="Output CSV")
+    parser.add_argument(
+        "--stats", type=str, default="m5out/stats.txt", help="Path to gem5 stats.txt"
+    )
+    parser.add_argument(
+        "--out", type=str, default="filtered_stats.csv", help="Output CSV"
+    )
 
     # run metadata
     parser.add_argument("--benchmark", type=str, default="benchmark")
@@ -97,8 +102,8 @@ def main():
     prefixes = {
         "l1d": "board.cache_hierarchy.clusters.l1dcache",
         "l1i": "board.cache_hierarchy.clusters.l1icache",
-        "l2":  "board.cache_hierarchy.clusters.l2cache",
-        "l3":  "board.cache_hierarchy.l3_cache",
+        "l2": "board.cache_hierarchy.clusters.l2cache",
+        "l3": "board.cache_hierarchy.l3_cache",
     }
 
     cache = {}
@@ -108,7 +113,7 @@ def main():
         miss = get_total_counter(stats, f"{prefix}.overallMisses")
 
         dyn = stats.get(f"{prefix}.power_model.dynamicPower", 0.0)
-        st  = stats.get(f"{prefix}.power_model.staticPower", 0.0)
+        st = stats.get(f"{prefix}.power_model.staticPower", 0.0)
 
         miss_rate = (miss / acc * 100.0) if acc else 0.0
 
@@ -166,10 +171,7 @@ def main():
     print(f"Arguments: {args.benchmark_args}")
     print("")
     print(f"Execution time: {sim_seconds:.10f} s")
-    print(
-        f"Final tick: {final_tick} ticks "
-        f"({(final_tick/1e12):.10f} s)\n"
-    )
+    print(f"Final tick: {final_tick} ticks ({(final_tick / 1e12):.10f} s)\n")
 
     for level in ["l1i", "l1d", "l2", "l3"]:
         c = cache[level]
@@ -180,6 +182,7 @@ def main():
         print(f"Dynamic power:   {c['dynamic_power_W']:.10f} W")
         print(f"Static power:    {c['static_power_W']:.10f} W")
         print("")
+
 
 if __name__ == "__main__":
     main()
