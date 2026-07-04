@@ -1,48 +1,31 @@
-# ARM_Power_Model
-This repo contains a power and thermal model of a ARM CPU.
-# Cache Hierarchy Block Diagram
-![Alt text](/images/Cache_Hierarchy.png)
+# ARM Cache Power Model
 
-# Instructions (Assuming Project is Cloned in Home directory (~))
-1. Make sure you have built ARM execeutable gem5.opt in gem5/build/ARM/gem5.opt (or just have ARM gem5.opt)
-2. Code for cache and power model are in ~/ARM_Power_Model/Power_src
-3. To run code: "Path to ARM gem5.opt" main.py
-EX: ~/ARM_Power_Model/gem5/build/ARM/gem5.opt main.py
+This project builds a custom three-level cache hierarchy for gem5 and attaches simple power models to the L1/L2/L3 caches. It is designed for ARM SE-mode simulations and is meant to be run with an ARM build of gem5.
 
-Flags
---binary (points to benchmark/executable, default: program_arm64)
+## What this project does
 
---l1i_size (L1 Instruction Cache size, default: 32KiB)
+- Creates a private L1 instruction cache, private L1 data cache, private L2 cache, and shared L3 cache
+- Configures the hierarchy through a custom gem5 component in [src/three_level.py](src/three_level.py)
+- Attaches power models to each cache level during simulation setup
+- Runs a user-specified ARM64 Linux binary through [src/main.py](src/main.py)
 
---l1d_size (L1 Data Cache size, default: 32KiB)
+## Project structure
 
---l2_size (L2 Cache size, default: 256KiB)
+- [src/main.py](src/main.py) — command-line entrypoint for launching gem5 simulations
+- [src/three_level.py](src/three_level.py) — custom cache hierarchy and power-model definitions
+- [src/tests/test_sample.c](src/tests/test_sample.c) — simple sample C program
 
---l3_size (L3 Cache size, default: 2MiB)
+## Requirements
 
---l1i_assoc (L1 Instruction Cache Associciation, default: 8)
+- A gem5 build for ARM, for example:
+  - [gem5/build/ARM/gem5.opt](../gem5/build/ARM/gem5.opt)
+- A cross-compiler for ARM64 Linux binaries
+  - `aarch64-linux-gnu-gcc` is recommended
+- Python environment compatible with your gem5 build
 
---l1d_assoc (L1 Data Cache Associciation, default: 8)
+## Build a sample ARM64 program
 
---l2_assoc (L2 Cache Associciation, default: 16)
-
---l3_assoc (L3 Cache Associciation, default: 32)
-
---block_size (Cannot change, default to 64 bytes)
-
---l1i_replacement_policy
---l1d_replacement_policy
---l2_replacement_policy
---l3_replacement_policy
-* All cache policies default to Least Recentl Used (LRURP)
-* All options are: LRURP, FIFORP, and TreePLRURP
-
---cpu_type (Options: TIMING, ATOMIC, KVM, default: TIMING)
-
-# Compiling C programs for execution
-To run a C program under gem5, first build it as an ARM64 Linux binary.
-
-Example using the sample source in src/tests/test_sample.c:
+From the project source directory:
 
 ```bash
 cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
@@ -50,7 +33,16 @@ cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
 aarch64-linux-gnu-gcc -static -O2 -o tests/test_sample_arm64 tests/test_sample.c
 ```
 
-This produces an executable named tests/test_sample_arm64 that can be run with the provided script:
+If `aarch64-linux-gnu-gcc` is not available, try:
+
+```bash
+clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -static -O2 \
+  -o tests/test_sample_arm64 tests/test_sample.c
+```
+
+## Run a simulation
+
+Run the sample binary with the provided script:
 
 ```bash
 cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
@@ -58,11 +50,37 @@ cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
   --binary tests/test_sample_arm64
 ```
 
-If your system does not have aarch64-linux-gnu-gcc installed, try:
+## Useful options
+
+The launcher accepts the following common options:
+
+- `--binary` — path to the ARM64 binary to execute
+- `--l1i_size`, `--l1d_size`, `--l2_size`, `--l3_size` — cache sizes
+- `--l1i_assoc`, `--l1d_assoc`, `--l2_assoc`, `--l3_assoc` — cache associativity
+- `--block_size` — cache line size in bytes
+- `--l1i_replacement_policy`, `--l1d_replacement_policy`, `--l2_replacement_policy`, `--l3_replacement_policy` — replacement policy (`LRURP`, `FIFORP`, `TreePLRURP`)
+- `--cpu_type` — CPU model (`TIMING`, `ATOMIC`, `KVM`)
+
+Example with custom cache sizes:
 
 ```bash
-clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -static -O2 \
-  -o tests/test_sample_arm64 tests/test_sample.c
+/home/kevin/Projects/gem5_projects/gem5/build/ARM/gem5.opt main.py \
+  --binary tests/test_sample_arm64 \
+  --l1i_size 16KiB \
+  --l1d_size 16KiB \
+  --l2_size 128KiB \
+  --l3_size 1MiB
 ```
 
-Tip: use the -static flag when possible so the binary is easier to run in gem5's SE mode.
+## Expected output
+
+A successful run prints the program output and writes statistics to:
+
+```text
+m5out/stats.txt
+```
+
+## Notes
+
+- The current setup is intended for simple SE-mode ARM workloads.
+- The power model is attached after the board pre-instantiation step so that the cache objects exist before the model is wired up.
