@@ -33,7 +33,7 @@ From the project source directory:
 ```bash
 cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
 
-aarch64-linux-gnu-gcc -static -O2 -o tests/test_sample_arm64 tests/test_sample.c
+aarch64-linux-gnu-gcc -static -o tests/test_sample_arm64 tests/test_sample.c
 ```
 
 If `aarch64-linux-gnu-gcc` is not available, try:

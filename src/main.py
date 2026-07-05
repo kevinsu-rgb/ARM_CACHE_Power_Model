@@ -1,4 +1,7 @@
 import argparse
+from types import MethodType
+
+import m5
 
 from three_level import PrivateL1PrivateL2SharedL3CacheHierarchy
 from gem5.isas import ISA
@@ -40,8 +43,8 @@ parser.add_argument("--l3_replacement_policy", type=str, default="LRURP")
 parser.add_argument(
     "--cpu_type",
     type=str,
-    default="DerivO3CPU",
-    choices=["DerivO3CPU", "TIMING", "ATOMIC", "KVM"],
+    default="o3",
+    choices=["o3", "timing", "atomic", "kvm"],
 )
 
 args = parser.parse_args()
@@ -97,17 +100,19 @@ else:
     l3_policy = LRURP()
 
 # ----------------- CPU -----------------
-if args.cpu_type == "TIMING":
+if args.cpu_type == "timing":
     cpu_type = CPUTypes.TIMING
-elif args.cpu_type == "ATOMIC":
+elif args.cpu_type == "atomic":
     cpu_type = CPUTypes.ATOMIC
-elif args.cpu_type == "KVM":
+elif args.cpu_type == "kvm":
     cpu_type = CPUTypes.KVM
+elif args.cpu_type == "o3":
+    cpu_type = CPUTypes.O3
 
 processor = SimpleProcessor(
     cpu_type=cpu_type,
     isa=ISA.ARM,
-    num_cores=2,
+    num_cores=1,
 )
 
 board = SimpleBoard(
@@ -130,7 +135,7 @@ board = SimpleBoard(
         # l3_block_size=args.l3_block_size,
     ),
     processor=processor,
-    memory=DualChannelDDR4_2400(size="2GB"),
+    memory=DualChannelDDR4_2400(size="4GB"),
     clk_freq="1GHz",
 )
 
@@ -178,25 +183,48 @@ print("\n===== End Configuration =====\n")
 
 board.set_se_binary_workload(binary)
 
-# Patch the board's _pre_instantiate to add power model
-original_pre_instantiate = board._pre_instantiate
 
-
-def patched_pre_instantiate(*args, **kwargs):
-    """Call the original pre-instantiate hook and return its root object."""
-    root = original_pre_instantiate(*args, **kwargs)
-
+def set_up_power_model(board):
     board.get_cache_hierarchy().add_power_model()
+
+
+def _instantiate_with_power_model(simulator):
+    root = simulator._board._pre_instantiate(
+        full_system=simulator._full_system
+    )
+    assert root is not None
+
+    set_up_power_model(simulator._board)
     print("Power model added successfully!")
-    return root
 
+    if m5._simulate_module._instantiated:
+        raise Exception(
+            "m5.instantiate() called before `Simulator.run`"
+            " Use either legacy m5.simulate or stdlib."
+        )
 
-# Replace the board's method
-board._pre_instantiate = patched_pre_instantiate
+    m5._simulate_module._instantiated = True
+    m5._simulate_module._fix_all_objects(root)
+    m5._simulate_module._dump_configs(root, str(simulator._outdir))
+
+    if simulator._board._checkpoint:
+        m5._simulate_module._create_cpp_objects(
+            root, ckpt_dir=simulator._board._checkpoint.as_posix()
+        )
+    else:
+        m5._simulate_module._create_cpp_objects(root, ckpt_dir=None)
+
+    m5._simulate_module._dump_configs_post_cpp(root, str(simulator._outdir))
+
+    simulator._root = root
+    simulator._instantiated = True
+    simulator._board._post_instantiate()
+
 
 # Create and run simulator normally
 sim = Simulator(board)
 print("Beginning simulation with power model...")
+sim._instantiate = MethodType(_instantiate_with_power_model, sim)
 sim.run()
 
 # Print where to find power stats
