@@ -1,4 +1,3 @@
-import dataclasses
 from pathlib import Path
 
 import pytest
@@ -7,7 +6,7 @@ from helpers import cfg
 from extract_gem5_stats import discover_components, parse_stats_file
 from power.characterize import Coefficients
 from power.mcpat_runner import ComponentPower
-from validate_mcpat import Row, compare, counts_from_stats
+from validate_mcpat import _discover, compare, counts_from_stats
 
 FIX = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -54,12 +53,12 @@ def _setup(n=2):
         energy_j={"core": {"core.cycles": E_CYC, "core.int_insts": E_INT},
                   "l1i": {}, "l1d": {}, "l2": {}, "l3": {}},
         created="t")
-    _, core_cyc, sys_cyc = counts_from_stats(stats, c, comps)
+    all_counts, core_cyc, sys_cyc = counts_from_stats(stats, c, comps)
     sim = stats["simSeconds"]
     res = {}
     cyc = {i: stats[f"{comps['cores'][i]}.numCycles"] for i in range(n)}
     for i in range(n):
-        ints = counts_from_stats(stats, c, comps)[0][(i, "core.int_insts")]
+        ints = all_counts[(i, "core.int_insts")]
         g = E_CYC * cyc[i] + E_INT * ints
         pre = comps["cores"][i]
         stats[f"{pre}.power_model.dynamicPower"] = g / sim
@@ -109,6 +108,54 @@ def test_compare_flags_leakage_mismatch():
     assert [r.component_path for r in rows if r.static_rel_err > 0.01] == ["l3", "total"]
 
 
-def test_row_defaults():
-    r = Row("x", 0.0, 0.0, 0.0, 1.0, 1.0)
-    assert dataclasses.is_dataclass(r)
+def test_idle_core_is_precision_limited_and_passes():
+    stats, coeffs, c, comps, res = _setup()
+    rows = compare(stats, coeffs, c, comps, res)
+    idle = next(r for r in rows if r.component_path == "core1")
+    assert idle.precision_limited and idle.rel_err <= 0.01 and idle.allowance_J > 0
+    assert idle.mcpat_dyn_J_raw > 1e5 * abs(idle.mcpat_dyn_J) - 1e-30 and idle.mcpat_dyn_J_raw > 0
+
+
+def test_busy_core_small_error_fails_unflagged():
+    stats, coeffs, c, comps, res = _setup()
+    stats[f"{comps['cores'][0]}.power_model.dynamicPower"] *= 1.0101
+    row = next(r for r in compare(stats, coeffs, c, comps, res)
+               if r.component_path == "core0")
+    assert not row.precision_limited and row.rel_err > 0.01
+
+
+def _light_core1(factor):
+    """Core 1 with adjusted = 1e-3 * raw and gem5 = factor * adjusted."""
+    stats, coeffs, c, comps, res = _setup()
+    sys_cyc = counts_from_stats(stats, c, comps)[2]
+    k = E_CYC * (sys_cyc - stats[f"{comps['cores'][1]}.numCycles"])
+    adj = k / 999.0                       # raw = adj + k = 1000 * adj
+    node = res[("System", "Core 1")]
+    res[("System", "Core 1")] = ComponentPower(
+        runtime_dynamic_energy_j=adj + k,
+        subthreshold_leakage_w=node.subthreshold_leakage_w)
+    stats[f"{comps['cores'][1]}.power_model.dynamicPower"] = adj * factor / stats["simSeconds"]
+    return next(r for r in compare(stats, coeffs, c, comps, res)
+                if r.component_path == "core1")
+
+
+def test_lightly_active_core_5pct_error_never_unflagged_pass():
+    row = _light_core1(1.05)
+    # a = 1e-5*raw = 1e-2*adj > 0.1*tol*adj -> flagged; 5% error > a + 1% -> fails
+    assert row.precision_limited
+    assert row.rel_err > 0.01
+    # a within-allowance error is flagged and passes
+    ok = _light_core1(1.015)
+    assert ok.precision_limited and ok.rel_err <= 0.01
+
+
+def test_coreless_run_has_cache_rows_and_no_core_rows():
+    stats, coeffs, c, comps, res = _setup(1)
+    stats = {k: v for k, v in stats.items() if ".processor." not in k}
+    t_cfg = cfg(num_cores=1, cpu_type="TIMING")
+    comps = _discover(stats, t_cfg)
+    assert comps["cores"] == [] and len(comps["l1i"]) == 1 and comps["l3"]
+    rows = compare(stats, coeffs, t_cfg, comps, res)
+    names = [r.component_path for r in rows]
+    assert names == ["l1i0", "l1d0", "l20", "l3", "total"]
+    assert all(r.rel_err <= 0.01 and r.static_rel_err <= 0.01 for r in rows)

@@ -15,14 +15,16 @@ cores, which are modelled as clock-gated). The core comparison therefore uses
     mcpat_core_adj = mcpat_core - e_cyc * (system_cycles - numCycles_i)
 
 with ``e_cyc`` the ``core.cycles`` coefficient. McPAT prints 6 significant
-digits, so differences below 1e-5 of the raw McPAT value count as rounding noise
-(this matters only for idle cores, whose adjusted energy is ~0). Both the raw and the adjusted
+digits, so the adjusted core energy has an absolute precision floor of 1e-5*raw.
+Core rows where that floor exceeds 10% of the tolerance band are marked
+PRECISION-LIMITED (e.g. idle cores) and pass iff |g-m| <= floor + tol*|m|. Both the raw and the adjusted
 McPAT values are reported. All event-driven terms are validated independently.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -58,23 +60,41 @@ class Row:
     mcpat_static_W: float
     mcpat_dyn_J_raw: float = 0.0
     static_rel_err: float = 0.0
+    precision_limited: bool = False
+    allowance_J: float = 0.0
 
 
 PRINT_NOISE = 1e-5  # McPAT prints 6 significant digits; relative resolution <= 1e-5
 
 
-def _rel(g: float, m: float, raw: float | None = None) -> float:
-    """|g - m| / max(|m|, 1e-15), after discarding McPAT print-rounding noise.
-
-    ``raw`` is the printed McPAT value ``m`` was derived from (the adjusted core
-    energy is a small difference of two large numbers, so the 6-digit rounding
-    of the raw value is absolute noise on ``m``).
-    """
-    noise = PRINT_NOISE * abs(m if raw is None else raw)
-    diff = max(0.0, abs(g - m) - noise)
+def _rel(g: float, m: float) -> float:
+    """|g - m| / max(|m|, 1e-15); 0 when both sides are below 1e-15."""
     if abs(g) < EPS and abs(m) < EPS:
         return 0.0
-    return diff / max(abs(m), EPS)
+    return abs(g - m) / max(abs(m), EPS)
+
+
+def _dyn_row(name: str, g: float, m: float, raw: float, tol: float,
+             g_st: float, m_st: float) -> Row:
+    """Dynamic-energy row.
+
+    The adjusted core energy is a difference of large, 6-significant-digit
+    numbers, so ``a = 1e-5*|raw|`` is an irreducible absolute precision floor.
+    Rows where that floor exceeds 10% of the tolerance band are flagged
+    precision_limited and pass iff |g-m| <= a + tol*|m|; all other rows get no
+    allowance at all.
+    """
+    a = PRINT_NOISE * abs(raw)
+    limited = a > 0.1 * tol * max(abs(m), EPS)
+    if limited:
+        if abs(g) < EPS and abs(m) < EPS:
+            err = 0.0
+        else:
+            err = max(0.0, abs(g - m) - a) / max(abs(m), EPS)
+    else:
+        err = _rel(g, m)
+    return Row(name, g, m, err, g_st, m_st, raw, _rel(g_st, m_st), limited,
+               a if limited else 0.0)
 
 
 def _num_cycles(stats: dict, comps: dict, i: int) -> int:
@@ -116,7 +136,7 @@ def counts_from_stats(stats: dict, cfg: PowerConfig, comps: dict
 
 
 def compare(stats: dict, coeffs: Coefficients, cfg: PowerConfig, comps: dict,
-            mcpat_result: McpatResult) -> list[Row]:
+            mcpat_result: McpatResult, tolerance: float = 0.01) -> list[Row]:
     """One Row per compared component plus a final "total" row."""
     sim = stats["simSeconds"]
     sys_cyc = _system_cycles(stats, cfg, comps)
@@ -140,8 +160,11 @@ def compare(stats: dict, coeffs: Coefficients, cfg: PowerConfig, comps: dict,
             items.append((f"{c}{i}", comps[c][i], c, en[c], en[c]))
         for name, prefix, c, raw, adj in items:
             g_dyn, g_st = gem5(prefix)
-            rows.append(Row(name, g_dyn, adj, _rel(g_dyn, adj, raw), g_st, lk[c], raw,
-                            _rel(g_st, lk[c])))
+            if name.startswith("core"):
+                rows.append(_dyn_row(name, g_dyn, adj, raw, tolerance, g_st, lk[c]))
+            else:
+                rows.append(Row(name, g_dyn, adj, _rel(g_dyn, adj), g_st, lk[c], raw,
+                                _rel(g_st, lk[c])))
         if i == 0 and comps["l3"]:
             g_dyn, g_st = gem5(comps["l3"][0])
             rows.append(Row("l3", g_dyn, en["l3"], _rel(g_dyn, en["l3"]), g_st,
@@ -158,17 +181,28 @@ def compare(stats: dict, coeffs: Coefficients, cfg: PowerConfig, comps: dict,
 def format_table(rows: list[Row], tolerance: float) -> str:
     hdr = ("McPAT cross-check (dynamic energy J, leakage W). mcpat_dyn_J is adjusted: "
            "core rows subtract e_cyc*(system_cycles - numCycles_i) because McPAT "
-           "charges core base energy per SYSTEM cycle; mcpat_raw is unadjusted.\n")
+           "charges core base energy per SYSTEM cycle; mcpat_raw is unadjusted. "
+           "PRECISION-LIMITED rows are limited by McPAT's 6-digit output.\n")
     cols = (f"{'component':<10}{'gem5_dyn_J':>14}{'mcpat_dyn_J':>14}{'mcpat_raw':>14}"
             f"{'rel_err':>10}{'gem5_st_W':>12}{'mcpat_st_W':>12}{'st_err':>10}  status\n")
     lines = []
     for r in rows:
         ok = r.rel_err <= tolerance and r.static_rel_err <= tolerance
+        tag = (f"  PRECISION-LIMITED (allowance {r.allowance_J:.2e} J)"
+               if r.precision_limited else "")
         lines.append(f"{r.component_path:<10}{r.gem5_dyn_J:14.6e}{r.mcpat_dyn_J:14.6e}"
                      f"{r.mcpat_dyn_J_raw:14.6e}{r.rel_err:10.2e}{r.gem5_static_W:12.6f}"
                      f"{r.mcpat_static_W:12.6f}{r.static_rel_err:10.2e}  "
-                     f"{'ok' if ok else 'FAIL'}")
+                     f"{'ok' if ok else 'FAIL'}{tag}")
     return hdr + cols + "\n".join(lines)
+
+
+_CLUSTER_RX = {
+    "l1i": re.compile(r"^(board\.cache_hierarchy\.clusters(\d*)\.l1icache)\."),
+    "l1d": re.compile(r"^(board\.cache_hierarchy\.clusters(\d*)\.l1dcache)\."),
+    "l2": re.compile(r"^(board\.cache_hierarchy\.clusters(\d*)\.l2cache)\."),
+}
+_L3_PREFIX = "board.cache_hierarchy.l3_cache"
 
 
 def _discover(stats: dict, cfg: PowerConfig) -> dict:
@@ -177,14 +211,17 @@ def _discover(stats: dict, cfg: PowerConfig) -> dict:
     except ValueError:
         if cfg.cpu_type not in CORELESS:
             raise
-    # Core-less runs have no core stats; add dummy ones so discovery succeeds.
-    n = cfg.num_cores
-    aug = dict(stats)
-    for i in range(n):
-        aug["board.processor.cores.core.x" if n == 1 else
-            f"board.processor.cores{i}.core.x"] = 0
-    comps = discover_components(aug)
-    comps["cores"] = []
+    # Core-less runs: discover caches directly from the cluster stats.
+    comps: dict[str, list[str]] = {"cores": []}
+    for k, rx in _CLUSTER_RX.items():
+        by_idx = {}
+        for name in stats:
+            m = rx.match(name)
+            if m:
+                by_idx[int(m.group(2) or 0)] = m.group(1)
+        comps[k] = [by_idx[i] for i in sorted(by_idx)]
+    comps["l3"] = ([_L3_PREFIX]
+                   if any(n.startswith(_L3_PREFIX + ".") for n in stats) else [])
     return comps
 
 
@@ -217,15 +254,19 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    rows = compare(stats, coeffs, cfg, comps, result)
+    rows = compare(stats, coeffs, cfg, comps, result, args.tolerance)
     print(format_table(rows, args.tolerance))
     bad = [r.component_path for r in rows
            if r.rel_err > args.tolerance or r.static_rel_err > args.tolerance]
     if bad:
-        print(f"FAIL: components over {args.tolerance:.2%}: {', '.join(bad)}",
+        n_lim = sum(r.precision_limited for r in rows)
+        print(f"FAIL: components over {args.tolerance:.2%}: {', '.join(bad)} "
+              f"({n_lim} precision-limited rows)",
               file=sys.stderr)
         return 1
-    print(f"PASS: all components within {args.tolerance:.2%}")
+    n_lim = sum(r.precision_limited for r in rows)
+    print(f"PASS: all components within {args.tolerance:.2%} "
+          f"({len(rows) - n_lim} normal, {n_lim} precision-limited)")
     return 0
 
 

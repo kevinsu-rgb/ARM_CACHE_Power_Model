@@ -39,6 +39,9 @@ def hello(project_root):
     return str(project_root / "src/tests/test_sample_arm64")
 
 
+# Note: hello runs show a steady ~0.15-0.2% gap on every component; cause
+# unexplained (stats.txt prints 6 significant digits, which would not give a
+# consistent sign/size, and small_loop shows <=2e-4).
 def test_validate_o3_two_cores(run_gem5, mcpat_bin, project_root, hello, tmp_path):
     out = _run(run_gem5, tmp_path, ["--cpu_type", "O3", "--core_model", "o3_arm_v7a",
                                     "--num_cores", "2", "--binary", hello])
