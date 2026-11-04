@@ -227,3 +227,48 @@ def test_real_l2_leakage_monotonic(tmp_path, mcpat_bin):
         co, _ = get_coefficients(dataclasses.replace(b, caches=caches), mcpat_bin, tmp_path)
         leaks.append(co.leakage_w["l2"])
     assert leaks[2] > leaks[1] > leaks[0]
+
+
+def test_stdout_only_failure_lands_in_message_and_failed_dir(tmp_path):
+    b = tmp_path / "fake_mcpat"
+    b.write_text('#!/bin/sh\necho "ERROR: no valid data array organizations found"\nexit 1\n')
+    b.chmod(0o755)
+    cache = tmp_path / "cache"
+    with pytest.raises(McpatError) as ei:
+        get_coefficients(base_cfg(), b, cache)
+    h = config_hash(base_cfg(), ch.mcpat_sha256(b), SCHEMA_VERSION)
+    d = cache / "failed" / f"{h}-baseline"
+    msg = str(ei.value)
+    assert "no valid data array organizations found" in msg and str(d) in msg
+    assert "no valid data array" in (d / "stdout.txt").read_text()
+    assert (d / "stderr.txt").read_text() == ""
+    assert (d / "input.xml").read_text().startswith('<component id="root"')
+    assert "no valid data array" in (d / "error.txt").read_text()
+
+
+def test_missing_node_writes_failed_dir(tmp_path, monkeypatch, fake_bin):
+    inner = FakeRunner(W)
+
+    def no_l2(xml):
+        r = dict(inner(xml))
+        r.pop(("System", "L2 Cache 0"))
+        return r
+
+    _patch(monkeypatch, no_l2)
+    cache = tmp_path / "cache"
+    with pytest.raises(ch.CharacterizationRunError, match="L2 Cache 0") as ei:
+        get_coefficients(base_cfg(), fake_bin, cache)
+    assert isinstance(ei.value.__cause__.__cause__, ch.McpatOutputError)
+    h = config_hash(base_cfg(), ch.mcpat_sha256(fake_bin), SCHEMA_VERSION)
+    d = cache / "failed" / f"{h}-baseline"
+    assert "L2 Cache 0" in (d / "error.txt").read_text() and (d / "input.xml").exists()
+    assert str(d) in str(ei.value)
+
+
+def test_node_missing_raises_output_error_with_stdout():
+    from power.mcpat_runner import McpatOutput
+    r = McpatOutput({("System",): _cp(0, 0)})
+    r.stdout = "the raw output"
+    with pytest.raises(ch.McpatOutputError, match="Core 0") as ei:
+        ch.component_energies(r, 0)
+    assert isinstance(ei.value, McpatError) and ei.value.stdout == "the raw output"

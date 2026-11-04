@@ -23,8 +23,20 @@ _FIELD_BY_KEY = {
 }
 
 
+TAIL_CHARS = 2000
+
+
 class McpatError(RuntimeError):
-    """McPAT failed or produced unusable output."""
+    """McPAT failed or produced unusable output.
+
+    ``stdout``/``stderr`` hold McPAT's complete output when it is known (McPAT
+    reports fatal errors such as CACTI failures on stdout).
+    """
+
+    def __init__(self, message: str, *, stdout: str = "", stderr: str = ""):
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 class McpatNotFound(McpatError):
@@ -46,6 +58,13 @@ class ComponentPower:
 
 
 McpatResult = dict[tuple[str, ...], ComponentPower]
+
+
+class McpatOutput(dict):
+    """A McpatResult that also keeps McPAT's raw stdout/stderr for diagnostics."""
+
+    stdout: str = ""
+    stderr: str = ""
 
 
 def find_mcpat_bin(explicit: str | None, project_root: Path) -> Path:
@@ -96,9 +115,17 @@ def parse_mcpat_output(text: str) -> McpatResult:
     return {k: ComponentPower(**v) for k, v in fields.items()}
 
 
-def _require_components(result: McpatResult, context: str) -> McpatResult:
+def _tails(stdout: str, stderr: str) -> str:
+    """Message suffix with the last TAIL_CHARS characters of both streams."""
+    return (f"\n--- McPAT stdout (last {TAIL_CHARS} chars) ---\n{stdout[-TAIL_CHARS:]}"
+            f"\n--- McPAT stderr (last {TAIL_CHARS} chars) ---\n{stderr[-TAIL_CHARS:]}")
+
+
+def _require_components(result: McpatResult, context: str,
+                        stdout: str = "", stderr: str = "") -> McpatResult:
     if not result:
-        raise McpatError(f"McPAT output contained no components ({context})")
+        raise McpatError(f"McPAT output contained no components ({context})"
+                         + _tails(stdout, stderr), stdout=stdout, stderr=stderr)
     return result
 
 
@@ -115,16 +142,28 @@ def run_mcpat(xml_text: str, mcpat_bin: Path, workdir: Path,
             cwd=workdir, capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired as e:
-        raise McpatError(f"McPAT timed out after {timeout}s on {xml_path}") from e
+        out = _text(e.stdout)
+        err = _text(e.stderr)
+        raise McpatError(f"McPAT timed out after {timeout}s on {xml_path}" + _tails(out, err),
+                         stdout=out, stderr=err) from e
     if proc.returncode != 0:
         kind = (f"killed by signal {-proc.returncode}"
                 if proc.returncode < 0 else "failed")
         raise McpatError(
-            f"McPAT {kind} (returncode={proc.returncode}) on {xml_path}; "
-            f"stderr tail: {proc.stderr[-2000:]}"
-        )
-    return _require_components(parse_mcpat_output(proc.stdout),
-                               f"returncode={proc.returncode}, {xml_path}")
+            f"McPAT {kind} (returncode={proc.returncode}) on {xml_path}"
+            + _tails(proc.stdout, proc.stderr),
+            stdout=proc.stdout, stderr=proc.stderr)
+    out = McpatOutput(_require_components(parse_mcpat_output(proc.stdout),
+                                          f"returncode={proc.returncode}, {xml_path}",
+                                          proc.stdout, proc.stderr))
+    out.stdout, out.stderr = proc.stdout, proc.stderr
+    return out
+
+
+def _text(b: str | bytes | None) -> str:
+    if b is None:
+        return ""
+    return b.decode(errors="replace") if isinstance(b, bytes) else b
 
 
 def mcpat_sha256(mcpat_bin: Path) -> str:

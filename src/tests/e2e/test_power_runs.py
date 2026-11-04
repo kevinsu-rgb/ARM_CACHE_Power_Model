@@ -61,3 +61,19 @@ def test_core_model_with_minor_rejected(run_gem5, hello, tmp_path):
 def test_kvm_removed(run_gem5, hello, tmp_path):
     r = run_gem5(["--cpu_type", "KVM", "--binary", hello], outdir=tmp_path / "m5", cwd=tmp_path)
     assert r.returncode != 0
+
+
+def test_mcpat_failure_reported_cleanly(run_gem5, mcpat_bin, hello, tmp_path):
+    # 1 KiB L1D is a valid power-of-two geometry but CACTI cannot organise it;
+    # McPAT reports that on stdout only.
+    cache = tmp_path / "cache"
+    r = run_gem5(["--cpu_type", "O3", "--l1d_size", "1KiB", "--binary", hello,
+                  "--power_cache_dir", str(cache)], outdir=tmp_path / "m5", cwd=tmp_path)
+    out = r.stdout + r.stderr
+    assert r.returncode != 0
+    assert "Traceback" not in out
+    assert "ERROR: power characterization failed" in out
+    assert "no valid data array organizations found" in out
+    failed = list((cache / "failed").iterdir())
+    assert failed and str(failed[0]) in out
+    assert "no valid data array" in (failed[0] / "stdout.txt").read_text()

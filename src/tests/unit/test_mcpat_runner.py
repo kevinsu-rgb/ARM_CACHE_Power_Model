@@ -66,3 +66,35 @@ def test_bundled_regressions_match(mcpat_bin, t):
 def test_run_mcpat_nonzero_exit_raises(mcpat_bin, tmp_path):
     with pytest.raises(McpatError, match="input.xml"):
         run_mcpat("<component id='root'/>", mcpat_bin, tmp_path)
+
+
+def _script(tmp_path, body, name="fake_mcpat"):
+    p = tmp_path / name
+    p.write_text("#!/bin/sh\n" + body)
+    p.chmod(0o755)
+    return p
+
+
+def test_run_mcpat_failure_reports_stdout_and_keeps_streams(tmp_path):
+    b = _script(tmp_path, 'echo "ERROR: no valid data array organizations found"\n'
+                          'echo "warn-on-stderr" 1>&2\nexit 1\n')
+    with pytest.raises(McpatError) as ei:
+        run_mcpat("<x/>", b, tmp_path / "wd")
+    msg = str(ei.value)
+    assert "no valid data array organizations found" in msg and "warn-on-stderr" in msg
+    assert "no valid data array" in ei.value.stdout and "warn-on-stderr" in ei.value.stderr
+
+
+def test_run_mcpat_failure_tails_are_2000_chars(tmp_path):
+    b = _script(tmp_path, "printf 'HEAD%05000dTAIL' 0\nexit 3\n")
+    with pytest.raises(McpatError) as ei:
+        run_mcpat("<x/>", b, tmp_path / "wd")
+    assert "TAIL" in str(ei.value) and "HEAD" not in str(ei.value)
+    assert ei.value.stdout.startswith("HEAD")          # attribute is not truncated
+
+
+def test_run_mcpat_unparseable_output_reports_stdout(tmp_path):
+    b = _script(tmp_path, 'echo "something odd"\nexit 0\n')
+    with pytest.raises(McpatError, match="something odd") as ei:
+        run_mcpat("<x/>", b, tmp_path / "wd")
+    assert ei.value.stdout.strip() == "something odd"

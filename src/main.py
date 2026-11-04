@@ -165,8 +165,11 @@ if args.cpu_type in ("TIMING", "ATOMIC"):
 try:
     coeffs, coeffs_path = get_coefficients(
         power_cfg, find_mcpat_bin(args.mcpat_bin, PROJECT_ROOT), CACHE_DIR)
-except (McpatError, SuperpositionError) as exc:
-    sys.exit(f"ERROR: power characterization failed: {exc}")
+except (McpatError, SuperpositionError, OSError) as exc:
+    # gem5's embedded interpreter aborts on sys.exit(<str>) (pybind11 cannot
+    # cast the code to int), so print the message and exit with an int.
+    print(f"ERROR: power characterization failed: {exc}", file=sys.stderr)
+    sys.exit(1)
 
 print(f"Implied Vdd: {coeffs.implied_vdd:.2f} V "
       f"({args.tech_node} nm {args.device_type})")

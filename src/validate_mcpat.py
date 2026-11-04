@@ -285,7 +285,11 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    rows = compare(stats, coeffs, cfg, comps, result, args.tolerance)
+    try:
+        rows = compare(stats, coeffs, cfg, comps, result, args.tolerance)
+    except McpatError as e:          # e.g. McpatOutputError: missing output node
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     print(format_table(rows, args.tolerance))
     bad = [r.component_path for r in rows
            if r.rel_err > args.tolerance or r.static_rel_err > args.tolerance]

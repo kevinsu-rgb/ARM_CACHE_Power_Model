@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from power.config import (SCHEMA_VERSION, PowerConfig, config_from_dict,
                           config_hash, config_to_dict, implied_vdd)
@@ -38,11 +39,17 @@ class SuperpositionError(RuntimeError):
         self.deviations = deviations
 
 
-class CharacterizationRunError(McpatError):
-    """A McPAT run failed; carries the event name and the XML that was run."""
+class McpatOutputError(McpatError):
+    """McPAT ran but its output lacks a node the power model needs."""
 
-    def __init__(self, message: str, event: str, xml_text: str):
-        super().__init__(message)
+
+class CharacterizationRunError(McpatError):
+    """A McPAT run failed; carries the event name, the XML that was run and
+    McPAT's stdout/stderr."""
+
+    def __init__(self, message: str, event: str, xml_text: str,
+                 stdout: str = "", stderr: str = ""):
+        super().__init__(message, stdout=stdout, stderr=stderr)
         self.event = event
         self.xml_text = xml_text
 
@@ -51,7 +58,9 @@ def _node(r: McpatResult, path: tuple[str, ...]):
     try:
         return r[path]
     except KeyError:
-        raise KeyError(f"McPAT output has no node {'/'.join(path)!r}") from None
+        raise McpatOutputError(f"McPAT output has no node {'/'.join(path)!r}",
+                               stdout=getattr(r, "stdout", ""),
+                               stderr=getattr(r, "stderr", "")) from None
 
 
 def _paths(i: int) -> dict[str, tuple[str, ...]]:
@@ -113,25 +122,27 @@ def characterize(cfg: PowerConfig, runner: Runner, mcpat_sha: str) -> Coefficien
     cyc_sys = base_sys + N_EVENT
     cyc_core = {i: C0 + N_EVENT for i in range(cfg.num_cores)}
 
-    def run(label: str, counts: dict, cyc: dict, sysc: int = base_sys) -> McpatResult:
+    def run(label: str, counts: dict, cyc: dict, sysc: int = base_sys,
+            extract: Callable[[McpatResult], Any] = component_energies) -> Any:
+        """Run McPAT and extract values; any McpatError (including a missing
+        output node) becomes a CharacterizationRunError for this label."""
         xml = build_xml(cfg, counts, sysc, cyc)
         try:
-            return runner(xml)
+            return extract(runner(xml))
         except CharacterizationRunError:
             raise
         except McpatError as e:
-            raise CharacterizationRunError(str(e), label, xml) from e
+            raise CharacterizationRunError(str(e), label, xml, e.stdout, e.stderr) from e
 
-    base = run("baseline", {}, base_cyc)
-    e0 = component_energies(base)
-    leak = component_leakage(base)
+    e0, leak = run("baseline", {}, base_cyc,
+                   extract=lambda r: (component_energies(r), component_leakage(r)))
 
     events = events_for(cfg.core.kind)
 
     def one(e: str) -> dict[str, float]:
         if e == "core.cycles":
-            return component_energies(run(e, {}, cyc_core, cyc_sys))
-        return component_energies(run(e, {(0, e): N_EVENT}, dict(base_cyc)))
+            return run(e, {}, cyc_core, cyc_sys)
+        return run(e, {(0, e): N_EVENT}, dict(base_cyc))
 
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex:
         results = list(ex.map(one, events))
@@ -144,7 +155,7 @@ def characterize(cfg: PowerConfig, runner: Runner, mcpat_sha: str) -> Coefficien
                 energy_j[c][e] = v
 
     all_counts = {(0, e): N_EVENT for e in events if e != "core.cycles"}
-    eall = component_energies(run("all", all_counts, cyc_core, cyc_sys))
+    eall = run("all", all_counts, cyc_core, cyc_sys)
     deviations: dict[str, float] = {}
     bad = []
     for c in COMPONENTS:
@@ -206,8 +217,12 @@ def get_coefficients(cfg: PowerConfig, mcpat_bin: Path,
         d = cache_dir / "failed" / f"{h}-{e.event}"
         d.mkdir(parents=True, exist_ok=True)
         (d / "input.xml").write_text(e.xml_text)
+        (d / "stdout.txt").write_text(e.stdout)
+        (d / "stderr.txt").write_text(e.stderr)
         (d / "error.txt").write_text(str(e) + "\n")
-        raise
+        raise CharacterizationRunError(
+            f"McPAT run {e.event!r} failed; input and McPAT output saved in {d}\n{e}",
+            e.event, e.xml_text, e.stdout, e.stderr) from e
     finally:
         try:
             work_root.rmdir()
@@ -233,7 +248,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cache_dir", default=str(root / "power_cache"))
     a = ap.parse_args(argv)
     cfg = config_from_dict(json.loads(Path(a.config).read_text()))
-    _, path = get_coefficients(cfg, find_mcpat_bin(a.mcpat_bin, root), Path(a.cache_dir))
+    try:
+        _, path = get_coefficients(cfg, find_mcpat_bin(a.mcpat_bin, root), Path(a.cache_dir))
+    except (McpatError, SuperpositionError) as e:
+        print(f"error: power characterization failed: {e}", file=sys.stderr)
+        return 1
     print(path)
     return 0
 
