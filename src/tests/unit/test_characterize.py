@@ -193,7 +193,7 @@ def test_mcpat_failure_writes_failed_dir(tmp_path, monkeypatch, fake_bin):
     _patch(monkeypatch, failing)
     with pytest.raises(McpatError):
         get_coefficients(base_cfg(), fake_bin, cache)
-    h = config_hash(base_cfg(), ch.mcpat_sha256(fake_bin), SCHEMA_VERSION)
+    h = ch.cache_key(base_cfg(), ch.mcpat_sha256(fake_bin))
     d = cache / "failed" / f"{h}-l2.read_accesses"
     assert (d / "input.xml").exists() and "boom" in (d / "error.txt").read_text()
     assert not (cache / f"{h}.json").exists()
@@ -236,7 +236,7 @@ def test_stdout_only_failure_lands_in_message_and_failed_dir(tmp_path):
     cache = tmp_path / "cache"
     with pytest.raises(McpatError) as ei:
         get_coefficients(base_cfg(), b, cache)
-    h = config_hash(base_cfg(), ch.mcpat_sha256(b), SCHEMA_VERSION)
+    h = ch.cache_key(base_cfg(), ch.mcpat_sha256(b))
     d = cache / "failed" / f"{h}-baseline"
     msg = str(ei.value)
     assert "no valid data array organizations found" in msg and str(d) in msg
@@ -259,7 +259,7 @@ def test_missing_node_writes_failed_dir(tmp_path, monkeypatch, fake_bin):
     with pytest.raises(ch.CharacterizationRunError, match="L2 Cache 0") as ei:
         get_coefficients(base_cfg(), fake_bin, cache)
     assert isinstance(ei.value.__cause__.__cause__, ch.McpatOutputError)
-    h = config_hash(base_cfg(), ch.mcpat_sha256(fake_bin), SCHEMA_VERSION)
+    h = ch.cache_key(base_cfg(), ch.mcpat_sha256(fake_bin))
     d = cache / "failed" / f"{h}-baseline"
     assert "L2 Cache 0" in (d / "error.txt").read_text() and (d / "input.xml").exists()
     assert str(d) in str(ei.value)
@@ -272,3 +272,39 @@ def test_node_missing_raises_output_error_with_stdout():
     with pytest.raises(ch.McpatOutputError, match="Core 0") as ei:
         ch.component_energies(r, 0)
     assert isinstance(ei.value, McpatError) and ei.value.stdout == "the raw output"
+
+
+# ---- F5: the cache key fingerprints the generator --------------------------
+def test_cache_key_includes_generator_fingerprint():
+    c = base_cfg()
+    assert ch.cache_key(c, "sha") == config_hash(c, "sha", SCHEMA_VERSION,
+                                                 ch.generator_fingerprint(c))
+    assert ch.cache_key(c, "sha") != config_hash(c, "sha", SCHEMA_VERSION)
+
+
+@pytest.mark.parametrize("name,value", [("N_EVENT", 100_000), ("C0", 2_000_000)])
+def test_cache_key_changes_with_constants(monkeypatch, name, value):
+    before = ch.cache_key(base_cfg(), "sha")
+    monkeypatch.setattr(ch, name, value)
+    assert ch.cache_key(base_cfg(), "sha") != before
+
+
+def test_cache_key_changes_with_baseline_xml(monkeypatch):
+    before = ch.cache_key(base_cfg(), "sha")
+    real = ch.build_xml
+    monkeypatch.setattr(ch, "build_xml", lambda *a, **k: real(*a, **k) + "<!-- v2 -->")
+    assert ch.cache_key(base_cfg(), "sha") != before
+
+
+def test_cache_key_changes_with_event_list(monkeypatch):
+    before = ch.cache_key(base_cfg(), "sha")
+    real = ch.events_for
+    monkeypatch.setattr(ch, "events_for", lambda kind: real(kind)[:-1])
+    assert ch.cache_key(base_cfg(), "sha") != before
+
+
+def test_get_coefficients_file_named_by_cache_key(tmp_path, monkeypatch, fake_bin):
+    _patch(monkeypatch, FakeRunner(W))
+    co, p = get_coefficients(base_cfg(), fake_bin, tmp_path)
+    h = ch.cache_key(base_cfg(), ch.mcpat_sha256(fake_bin))
+    assert p.name == f"{h}.json" and co.config_hash == h

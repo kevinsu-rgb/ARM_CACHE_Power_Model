@@ -107,3 +107,10 @@ def test_validate_rejects_non_power_of_two_geometry(name, kw, field, value):
 ])
 def test_validate_accepts_power_of_two_geometry(name, kw):
     validate(_with_cache(name, **kw))
+
+
+def test_hash_fingerprint_param():
+    c = base_cfg()
+    assert config_hash(c, "abc", 1) == config_hash(c, "abc", 1, "")
+    assert config_hash(c, "abc", 1, "fp1") != config_hash(c, "abc", 1, "fp2")
+    assert config_hash(c, "abc", 1, "fp1") != config_hash(c, "abc", 1)

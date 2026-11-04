@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -89,6 +90,28 @@ def component_leakage(r: McpatResult, core_index: int = 0) -> dict[str, float]:
     return _component_values(r, core_index, lambda n: n.leakage_w)
 
 
+def generator_fingerprint(cfg: PowerConfig) -> str:
+    """SHA-256 over what determines the McPAT inputs beyond the config itself.
+
+    Covers the baseline XML text (so any change to the XML generator
+    invalidates cached coefficients), the event list for the core kind, and
+    the C0 / N_EVENT constants.
+    """
+    xml = build_xml(cfg, {}, 2 * C0, {i: C0 for i in range(cfg.num_cores)})
+    payload = json.dumps({
+        "baseline_xml_sha256": hashlib.sha256(xml.encode()).hexdigest(),
+        "events": sorted(events_for(cfg.core.kind)),
+        "C0": C0,
+        "N_EVENT": N_EVENT,
+    }, sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def cache_key(cfg: PowerConfig, mcpat_sha: str) -> str:
+    """Coefficient-cache key: config, McPAT binary, schema and generator."""
+    return config_hash(cfg, mcpat_sha, SCHEMA_VERSION, generator_fingerprint(cfg))
+
+
 @dataclass
 class Coefficients:
     schema_version: int
@@ -170,7 +193,7 @@ def characterize(cfg: PowerConfig, runner: Runner, mcpat_sha: str) -> Coefficien
             "superposition check failed (tolerance "
             f"{REL_TOL:.0%}, floor {ABS_TOL_J:g} J): " + "; ".join(bad), deviations)
 
-    h = config_hash(cfg, mcpat_sha, SCHEMA_VERSION)
+    h = cache_key(cfg, mcpat_sha)
     return Coefficients(
         schema_version=SCHEMA_VERSION, config=json.loads(json.dumps(config_to_dict(cfg))), config_hash=h,
         mcpat_sha256=mcpat_sha, implied_vdd=implied_vdd(cfg.tech_node_nm, cfg.device_type),
@@ -193,7 +216,7 @@ def get_coefficients(cfg: PowerConfig, mcpat_bin: Path,
     """Return cached coefficients for cfg, characterizing with McPAT if needed."""
     cache_dir = Path(cache_dir)
     sha = mcpat_sha256(mcpat_bin)
-    h = config_hash(cfg, sha, SCHEMA_VERSION)
+    h = cache_key(cfg, sha)
     path = cache_dir / f"{h}.json"
     if path.is_file():
         co = _load_valid(path, sha)

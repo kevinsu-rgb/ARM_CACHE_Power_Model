@@ -175,7 +175,14 @@ def config_from_dict(d: dict) -> PowerConfig:
     )
 
 
-def config_hash(cfg: PowerConfig, mcpat_sha: str, schema_version: int) -> str:
+def config_hash(cfg: PowerConfig, mcpat_sha: str, schema_version: int,
+                fingerprint: str = "") -> str:
+    """16-hex cache key.
+
+    ``fingerprint`` identifies the code that generates the McPAT inputs (see
+    ``power.characterize.generator_fingerprint``); empty by default.
+    """
     payload = json.dumps({"config": config_to_dict(cfg), "mcpat": mcpat_sha,
-                          "schema": schema_version}, sort_keys=True)
+                          "schema": schema_version, "generator": fingerprint},
+                         sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
