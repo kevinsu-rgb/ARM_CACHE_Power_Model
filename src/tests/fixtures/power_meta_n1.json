@@ -1,0 +1,12 @@
+{
+  "config_hash": "111d8fbd587119d0",
+  "coefficients_path": "/home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/power_cache/111d8fbd587119d0.json",
+  "cpu_type": "O3",
+  "core_model": "o3_arm_v7a",
+  "num_cores": 1,
+  "tech_node_nm": 28,
+  "device_type": "LOP",
+  "temperature_k": 350,
+  "implied_vdd": 0.6,
+  "clock_mhz": 1000
+}
