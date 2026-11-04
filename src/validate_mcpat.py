@@ -14,11 +14,16 @@ cores, which are modelled as clock-gated). The core comparison therefore uses
 
     mcpat_core_adj = mcpat_core - e_cyc * (system_cycles - numCycles_i)
 
-with ``e_cyc`` the ``core.cycles`` coefficient. McPAT prints 6 significant
-digits, so the adjusted core energy has an absolute precision floor of 1e-5*raw.
-Core rows where that floor exceeds 10% of the tolerance band are marked
-PRECISION-LIMITED (e.g. idle cores) and pass iff |g-m| <= floor + tol*|m|. Both the raw and the adjusted
-McPAT values are reported. All event-driven terms are validated independently.
+with ``e_cyc`` the ``core.cycles`` coefficient. Run time is the exact
+``T = simTicks / simFreq`` (``simSeconds`` is printed with 6 decimals only).
+
+Print precision: McPAT prints 6 significant digits (relative 1e-5 of the raw,
+unadjusted value) and gem5 prints ``dynamicPower``/``staticPower`` with 6
+decimals (5e-7 W absolute, i.e. 5e-7 W * T for energies). Every row, dynamic
+and static separately, gets the allowance ``a = 1e-5*|raw_mcpat| + a_g``. When
+``a`` exceeds 10% of the tolerance band the value is PRECISION-LIMITED and
+passes iff |g-m| <= a + tol*|m|; all other values get no allowance at all.
+Both the raw and the adjusted McPAT values are reported.
 """
 from __future__ import annotations
 
@@ -35,7 +40,8 @@ _SRC = Path(__file__).resolve().parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from extract_gem5_stats import discover_components, parse_stats_file  # noqa: E402
+from extract_gem5_stats import (discover_components, parse_stats_file,  # noqa: E402
+                                sim_time)
 from power.characterize import (Coefficients, component_energies,  # noqa: E402
                                 component_leakage)
 from power.config import PowerConfig, config_from_dict  # noqa: E402
@@ -60,11 +66,14 @@ class Row:
     mcpat_static_W: float
     mcpat_dyn_J_raw: float = 0.0
     static_rel_err: float = 0.0
-    precision_limited: bool = False
+    precision_limited: bool = False         # dynamic value is print-precision limited
     allowance_J: float = 0.0
+    static_precision_limited: bool = False
+    allowance_W: float = 0.0
 
 
 PRINT_NOISE = 1e-5  # McPAT prints 6 significant digits; relative resolution <= 1e-5
+GEM5_PRINT_W = 5e-7  # gem5 prints power with 6 decimals: half a unit in the last place
 
 
 def _rel(g: float, m: float) -> float:
@@ -74,27 +83,37 @@ def _rel(g: float, m: float) -> float:
     return abs(g - m) / max(abs(m), EPS)
 
 
-def _dyn_row(name: str, g: float, m: float, raw: float, tol: float,
-             g_st: float, m_st: float) -> Row:
-    """Dynamic-energy row.
+def _allowance(raw: float, a_gem5: float) -> float:
+    """Absolute print-precision allowance: McPAT's 6 digits plus gem5's 6 decimals."""
+    return PRINT_NOISE * abs(raw) + a_gem5
 
-    The adjusted core energy is a difference of large, 6-significant-digit
-    numbers, so ``a = 1e-5*|raw|`` is an irreducible absolute precision floor.
-    Rows where that floor exceeds 10% of the tolerance band are flagged
-    precision_limited and pass iff |g-m| <= a + tol*|m|; all other rows get no
-    allowance at all.
+
+def _check(g: float, m: float, a: float, tol: float) -> tuple[float, bool, float]:
+    """(error, precision_limited, allowance_used) for one compared value.
+
+    The value is precision-limited when the allowance ``a`` exceeds 10% of the
+    tolerance band; it then passes iff |g-m| <= a + tol*|m|. Otherwise the
+    plain relative error is used and no allowance is applied.
     """
-    a = PRINT_NOISE * abs(raw)
-    limited = a > 0.1 * tol * max(abs(m), EPS)
-    if limited:
-        if abs(g) < EPS and abs(m) < EPS:
-            err = 0.0
-        else:
-            err = max(0.0, abs(g - m) - a) / max(abs(m), EPS)
-    else:
-        err = _rel(g, m)
-    return Row(name, g, m, err, g_st, m_st, raw, _rel(g_st, m_st), limited,
-               a if limited else 0.0)
+    if a <= 0.1 * tol * max(abs(m), EPS):
+        return _rel(g, m), False, 0.0
+    if abs(g) < EPS and abs(m) < EPS:
+        return 0.0, True, a
+    return max(0.0, abs(g - m) - a) / max(abs(m), EPS), True, a
+
+
+def _row(name: str, g: float, m: float, raw: float, a_dyn: float,
+         g_st: float, m_st: float, a_st: float, tol: float) -> Row:
+    err, lim, used = _check(g, m, a_dyn, tol)
+    st_err, st_lim, st_used = _check(g_st, m_st, a_st, tol)
+    return Row(name, g, m, err, g_st, m_st, raw, st_err, lim, used, st_lim, st_used)
+
+
+def max_rel_err(rows: list[Row]) -> float:
+    """Largest dynamic or static error over values that are not precision-limited."""
+    errs = [r.rel_err for r in rows if not r.precision_limited]
+    errs += [r.static_rel_err for r in rows if not r.static_precision_limited]
+    return max(errs, default=0.0)
 
 
 def _num_cycles(stats: dict, comps: dict, i: int) -> int:
@@ -105,7 +124,7 @@ def _num_cycles(stats: dict, comps: dict, i: int) -> int:
 
 def _system_cycles(stats: dict, cfg: PowerConfig, comps: dict) -> int:
     cyc = [_num_cycles(stats, comps, i) for i in range(cfg.num_cores)]
-    sim = round(stats.get("simSeconds", 0.0) * cfg.clock_mhz * 1e6)
+    sim = round(sim_time(stats) * cfg.clock_mhz * 1e6)
     return max(sim, max(cyc, default=0), 1)
 
 
@@ -137,44 +156,52 @@ def counts_from_stats(stats: dict, cfg: PowerConfig, comps: dict
 
 def compare(stats: dict, coeffs: Coefficients, cfg: PowerConfig, comps: dict,
             mcpat_result: McpatResult, tolerance: float = 0.01) -> list[Row]:
-    """One Row per compared component plus a final "total" row."""
-    sim = stats["simSeconds"]
+    """One Row per compared component plus a final "total" row.
+
+    The total's allowances are the sums of the component allowances.
+    """
+    sim = sim_time(stats)
     sys_cyc = _system_cycles(stats, cfg, comps)
     e_cyc = coeffs.energy_j.get("core", {}).get("core.cycles", 0.0)
     has_core = cfg.cpu_type not in CORELESS
+    a_g_dyn = GEM5_PRINT_W * sim
 
     def gem5(prefix: str) -> tuple[float, float]:
         return (stats.get(f"{prefix}.power_model.dynamicPower", 0.0) * sim,
                 stats.get(f"{prefix}.power_model.staticPower", 0.0))
 
     rows: list[Row] = []
+    a_dyn_sum = a_st_sum = 0.0
+
+    def add(name: str, prefix: str, raw: float, adj: float, leak: float) -> None:
+        nonlocal a_dyn_sum, a_st_sum
+        g_dyn, g_st = gem5(prefix)
+        a_dyn = _allowance(raw, a_g_dyn)
+        a_st = _allowance(leak, GEM5_PRINT_W)
+        a_dyn_sum += a_dyn
+        a_st_sum += a_st
+        rows.append(_row(name, g_dyn, adj, raw, a_dyn, g_st, leak, a_st, tolerance))
+
     for i in range(cfg.num_cores):
         en = component_energies(mcpat_result, i)
         lk = component_leakage(mcpat_result, i)
-        items = []
         if has_core:
             raw = en["core"]
             adj = raw - e_cyc * (sys_cyc - _num_cycles(stats, comps, i))
-            items.append((f"core{i}", comps["cores"][i], "core", raw, adj))
+            add(f"core{i}", comps["cores"][i], raw, adj, lk["core"])
         for c in ("l1i", "l1d", "l2"):
-            items.append((f"{c}{i}", comps[c][i], c, en[c], en[c]))
-        for name, prefix, c, raw, adj in items:
-            g_dyn, g_st = gem5(prefix)
-            if name.startswith("core"):
-                rows.append(_dyn_row(name, g_dyn, adj, raw, tolerance, g_st, lk[c]))
-            else:
-                rows.append(Row(name, g_dyn, adj, _rel(g_dyn, adj), g_st, lk[c], raw,
-                                _rel(g_st, lk[c])))
+            add(f"{c}{i}", comps[c][i], en[c], en[c], lk[c])
         if i == 0 and comps["l3"]:
-            g_dyn, g_st = gem5(comps["l3"][0])
-            rows.append(Row("l3", g_dyn, en["l3"], _rel(g_dyn, en["l3"]), g_st,
-                            lk["l3"], en["l3"], _rel(g_st, lk["l3"])))
+            add("l3", comps["l3"][0], en["l3"], en["l3"], lk["l3"])
     gd = sum(r.gem5_dyn_J for r in rows)
     md = sum(r.mcpat_dyn_J for r in rows)
     gs = sum(r.gem5_static_W for r in rows)
     ms = sum(r.mcpat_static_W for r in rows)
-    rows.append(Row("total", gd, md, _rel(gd, md), gs, ms,
-                    sum(r.mcpat_dyn_J_raw for r in rows), _rel(gs, ms)))
+    raw_total = sum(r.mcpat_dyn_J_raw for r in rows)
+    err, lim, used = _check(gd, md, a_dyn_sum, tolerance)
+    st_err, st_lim, st_used = _check(gs, ms, a_st_sum, tolerance)
+    rows.append(Row("total", gd, md, err, gs, ms, raw_total, st_err, lim, used,
+                    st_lim, st_used))
     return rows
 
 
@@ -182,14 +209,18 @@ def format_table(rows: list[Row], tolerance: float) -> str:
     hdr = ("McPAT cross-check (dynamic energy J, leakage W). mcpat_dyn_J is adjusted: "
            "core rows subtract e_cyc*(system_cycles - numCycles_i) because McPAT "
            "charges core base energy per SYSTEM cycle; mcpat_raw is unadjusted. "
-           "PRECISION-LIMITED rows are limited by McPAT's 6-digit output.\n")
+           "PRECISION-LIMITED values are limited by McPAT's 6-digit and gem5's "
+           "6-decimal output.\n")
     cols = (f"{'component':<10}{'gem5_dyn_J':>14}{'mcpat_dyn_J':>14}{'mcpat_raw':>14}"
             f"{'rel_err':>10}{'gem5_st_W':>12}{'mcpat_st_W':>12}{'st_err':>10}  status\n")
     lines = []
     for r in rows:
         ok = r.rel_err <= tolerance and r.static_rel_err <= tolerance
-        tag = (f"  PRECISION-LIMITED (allowance {r.allowance_J:.2e} J)"
-               if r.precision_limited else "")
+        tag = ""
+        if r.precision_limited:
+            tag += f"  PRECISION-LIMITED dyn (allowance {r.allowance_J:.2e} J)"
+        if r.static_precision_limited:
+            tag += f"  PRECISION-LIMITED static (allowance {r.allowance_W:.2e} W)"
         lines.append(f"{r.component_path:<10}{r.gem5_dyn_J:14.6e}{r.mcpat_dyn_J:14.6e}"
                      f"{r.mcpat_dyn_J_raw:14.6e}{r.rel_err:10.2e}{r.gem5_static_W:12.6f}"
                      f"{r.mcpat_static_W:12.6f}{r.static_rel_err:10.2e}  "
@@ -258,17 +289,16 @@ def main(argv: list[str] | None = None) -> int:
     print(format_table(rows, args.tolerance))
     bad = [r.component_path for r in rows
            if r.rel_err > args.tolerance or r.static_rel_err > args.tolerance]
+    n_lim = sum(r.precision_limited or r.static_precision_limited for r in rows)
     if bad:
-        n_lim = sum(r.precision_limited for r in rows)
         print(f"FAIL: components over {args.tolerance:.2%}: {', '.join(bad)} "
               f"({n_lim} precision-limited rows)",
               file=sys.stderr)
         return 1
-    n_lim = sum(r.precision_limited for r in rows)
     print(f"PASS: all components within {args.tolerance:.2%} "
-          f"({len(rows) - n_lim} normal, {n_lim} precision-limited)")
+          f"({len(rows) - n_lim} normal, {n_lim} precision-limited); "
+          f"max rel_err (non-precision-limited) {max_rel_err(rows):.3e}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

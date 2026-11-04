@@ -39,21 +39,34 @@ def hello(project_root):
     return str(project_root / "src/tests/test_sample_arm64")
 
 
-# Note: hello runs show a steady ~0.15-0.2% gap on every component; cause
-# unexplained (stats.txt prints 6 significant digits, which would not give a
-# consistent sign/size, and small_loop shows <=2e-4).
-def test_validate_o3_two_cores(run_gem5, mcpat_bin, project_root, hello, tmp_path):
-    out = _run(run_gem5, tmp_path, ["--cpu_type", "O3", "--core_model", "o3_arm_v7a",
-                                    "--num_cores", "2", "--binary", hello])
+# The former steady ~0.19% gap on hello runs was simSeconds' 6-decimal
+# rounding; with T = simTicks/simFreq the measured max is ~1e-4.
+HELLO_MAX_REL_ERR = 5e-4
+_MAX_RX = re.compile(r"max rel_err \(non-precision-limited\) (\S+)")
+
+
+def _max_rel_err(stdout):
+    m = _MAX_RX.search(stdout)
+    assert m, stdout
+    return float(m.group(1))
+
+
+def _validate_hello(run_gem5, project_root, tmp_path, args):
+    out = _run(run_gem5, tmp_path, args)
     r = _validate(project_root, out, tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
+    assert _max_rel_err(r.stdout) < HELLO_MAX_REL_ERR, r.stdout
+
+
+def test_validate_o3_two_cores(run_gem5, mcpat_bin, project_root, hello, tmp_path):
+    _validate_hello(run_gem5, project_root, tmp_path,
+                    ["--cpu_type", "O3", "--core_model", "o3_arm_v7a",
+                     "--num_cores", "2", "--binary", hello])
 
 
 def test_validate_minor(run_gem5, mcpat_bin, project_root, hello, tmp_path):
-    out = _run(run_gem5, tmp_path, ["--cpu_type", "MINOR", "--num_cores", "1",
-                                    "--binary", hello])
-    r = _validate(project_root, out, tmp_path)
-    assert r.returncode == 0, r.stdout + r.stderr
+    _validate_hello(run_gem5, project_root, tmp_path,
+                    ["--cpu_type", "MINOR", "--num_cores", "1", "--binary", hello])
 
 
 @pytest.mark.slow

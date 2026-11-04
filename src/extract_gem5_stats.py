@@ -61,6 +61,19 @@ def parse_stats_file(path):
     return stats
 
 
+def sim_time(stats):
+    """Simulated time in seconds: simTicks / simFreq, exact.
+
+    gem5 prints simSeconds with only 6 decimals (e.g. 0.000170 for
+    0.000170319 s), so it is used only when simTicks or simFreq is missing.
+    """
+    ticks = stats.get("simTicks")
+    freq = stats.get("simFreq")
+    if ticks is not None and freq:
+        return ticks / freq
+    return stats.get("simSeconds", 0.0)
+
+
 def lookup(stats, name, default=0):
     """Return stats[name], else stats[name + '::total'], else default."""
     if name in stats:
@@ -123,7 +136,7 @@ def _cache_fields(stats, prefix):
 def build_row(stats, meta, benchmark, benchmark_args):
     """Build one CSV row (ordered dict) from parsed stats and power_meta."""
     comps = discover_components(stats)
-    sim_seconds = stats.get("simSeconds", 0.0)
+    sim_seconds = sim_time(stats)
     row = {
         "benchmark": benchmark,
         "benchmark_args": benchmark_args,

@@ -50,3 +50,27 @@ def test_discover_count_mismatch_raises():
     }
     with pytest.raises(ValueError):
         discover_components(stats)
+
+
+def test_sim_time_exact_from_ticks_and_freq():
+    from extract_gem5_stats import sim_time
+    stats = {"simSeconds": 0.000170, "simTicks": 170319000, "simFreq": 1000000000000}
+    assert sim_time(stats) == pytest.approx(170319000 / 1e12, rel=1e-15)
+    assert sim_time({"simSeconds": 0.000170}) == 0.000170
+    assert sim_time({"simSeconds": 0.000170, "simTicks": 5}) == 0.000170
+    assert sim_time({"simSeconds": 0.000170, "simTicks": 5, "simFreq": 0}) == 0.000170
+    assert sim_time({}) == 0.0
+
+
+def test_row_energy_uses_exact_time():
+    stats = parse_stats_file(FIX / "stats_n1.txt")
+    meta = json.loads((FIX / "power_meta_n1.json").read_text())
+    stats["simSeconds"] = 0.000170
+    stats["simTicks"] = 170319000
+    stats["simFreq"] = 1000000000000
+    row = build_row(stats, meta, "hello", "")
+    t = 170319000 / 1e12
+    assert row["simSeconds"] == pytest.approx(t, rel=1e-15)
+    assert row["chip_energy_J"] == pytest.approx(row["chip_total_W"] * t, rel=1e-15)
+    assert row["total_energy_J"] == pytest.approx(row["chip_energy_J"] + row["dram_energy_J"],
+                                                  rel=1e-15)
