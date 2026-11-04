@@ -174,6 +174,8 @@ Not modelled: crossbars and buses, the memory controller, page-table-walker cach
 - ARM FP/SIMD activity is counted from gem5's `Vec*` stats.
 - The Neoverse V2 model overstates absolute power, because real V2 silicon is 4 to 5 nm and the model only supports nodes of 22 nm and larger.
 - The technology node must be in 22 to 90 nm.
+- Every cache's associativity, block size and set count (`size / (assoc x block_size)`) must be powers of two, because McPAT/CACTI cannot model anything else. `main.py` rejects other geometries up front, for example `--l2_assoc 12: McPAT requires a power of two`.
+- Some legal geometries are still too small for CACTI (for example a 1 KiB L1D: `no valid data array organizations found`). Characterization then fails with McPAT's own message, and the input XML, McPAT's stdout and stderr, and the error are saved in `power_cache/failed/<hash>-<event>/`.
 
 ### Example numbers
 

@@ -27,6 +27,44 @@ class ConfigError(ValueError):
     """Invalid power configuration."""
 
 
+class GeometryError(ConfigError):
+    """A cache geometry McPAT cannot model.
+
+    Attributes:
+        cache: cache name ("l1i", "l1d", "l2" or "l3").
+        field: offending CacheParams field ("assoc", "block_size" or "size_bytes").
+        value: the offending value.
+        reason: what McPAT requires, without the cache/value prefix.
+    """
+
+    def __init__(self, cache: str, field: str, value: int, reason: str):
+        super().__init__(f"cache {cache}: {field} {value}: {reason}")
+        self.cache = cache
+        self.field = field
+        self.value = value
+        self.reason = reason
+
+
+def _is_pow2(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+
+def _check_geometry(c: CacheParams) -> None:
+    """McPAT (CACTI) needs power-of-two associativity, line size and set count."""
+    pow2 = "McPAT requires a power of two"
+    if not _is_pow2(c.block_size):
+        raise GeometryError(c.name, "block_size", c.block_size, pow2)
+    if not _is_pow2(c.assoc):
+        raise GeometryError(c.name, "assoc", c.assoc, pow2)
+    way_bytes = c.assoc * c.block_size
+    sets, rem = divmod(c.size_bytes, way_bytes)
+    if rem or not _is_pow2(sets):
+        raise GeometryError(
+            c.name, "size_bytes", c.size_bytes,
+            f"{pow2} set count, size / (assoc x block_size) = "
+            f"{c.size_bytes} / ({c.assoc} x {c.block_size}) = {c.size_bytes / way_bytes:g}")
+
+
 @dataclass(frozen=True)
 class CoreParams:
     kind: str  # "ooo" | "inorder"
@@ -117,6 +155,7 @@ def validate(cfg: PowerConfig) -> None:
     for c in cfg.caches:
         if c.size_bytes <= 0 or c.assoc <= 0 or c.block_size <= 0:
             raise ConfigError(f"cache {c.name}: size, assoc and block_size must be positive")
+        _check_geometry(c)
 
 
 def config_to_dict(cfg: PowerConfig) -> dict:

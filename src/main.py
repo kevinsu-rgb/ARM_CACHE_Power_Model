@@ -21,7 +21,7 @@ from m5.util.convert import toFrequency
 
 from power.characterize import SuperpositionError, get_coefficients
 from power.config import (DEVICE_TYPES, HPI_FALLBACK_CORE, ConfigError,
-                          PowerConfig, validate)
+                          GeometryError, PowerConfig, validate)
 from power.cores import core_params_from_core, load_core_class, resolve_core_model
 from power.mcpat_runner import McpatError, find_mcpat_bin
 from power.models import attach_power_models
@@ -152,6 +152,15 @@ power_cfg = PowerConfig(
 )
 try:
     validate(power_cfg)
+except GeometryError as exc:
+    # Name the command-line flag and the value as the user typed it.
+    if exc.field == "block_size":
+        flag = "--block_size"
+    elif exc.field == "assoc":
+        flag = f"--{exc.cache}_assoc"
+    else:
+        flag = f"--{exc.cache}_size"
+    parser.error(f"{flag} {getattr(args, flag[2:])}: {exc.reason}")
 except ConfigError as exc:
     parser.error(str(exc))
 

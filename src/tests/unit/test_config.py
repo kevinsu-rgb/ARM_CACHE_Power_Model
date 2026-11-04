@@ -74,3 +74,36 @@ def test_validate_rejects_bad_temperature(t):
 @pytest.mark.parametrize("t", [300, 350, 400])
 def test_validate_accepts_good_temperature(t):
     validate(dataclasses.replace(base_cfg(), temperature_k=t))
+
+
+def _with_cache(name, **kw):
+    c = base_cfg()
+    return dataclasses.replace(c, caches=tuple(
+        dataclasses.replace(x, **kw) if x.name == name else x for x in c.caches))
+
+
+@pytest.mark.parametrize("name,kw,field,value", [
+    ("l2", {"assoc": 12}, "assoc", 12),
+    ("l1d", {"assoc": 3}, "assoc", 3),
+    ("l3", {"block_size": 48}, "block_size", 48),
+    ("l2", {"size_bytes": 768 * 1024}, "size_bytes", 768 * 1024),      # 768 sets
+    ("l1i", {"size_bytes": 32768 + 64}, "size_bytes", 32768 + 64),     # not divisible
+    ("l1i", {"size_bytes": 256, "assoc": 8}, "size_bytes", 256),       # 0.5 sets
+])
+def test_validate_rejects_non_power_of_two_geometry(name, kw, field, value):
+    from power.config import GeometryError
+    with pytest.raises(GeometryError) as ei:
+        validate(_with_cache(name, **kw))
+    e = ei.value
+    assert isinstance(e, ConfigError)
+    assert (e.cache, e.field, e.value) == (name, field, value)
+    assert name in str(e) and str(value) in str(e) and "power of two" in str(e)
+
+
+@pytest.mark.parametrize("name,kw", [
+    ("l1d", {"assoc": 1}), ("l1d", {"assoc": 2}), ("l2", {"assoc": 4}),
+    ("l2", {"size_bytes": 512 * 1024}), ("l3", {"size_bytes": 4 << 20, "assoc": 16}),
+    ("l1i", {"block_size": 128}),
+])
+def test_validate_accepts_power_of_two_geometry(name, kw):
+    validate(_with_cache(name, **kw))

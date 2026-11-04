@@ -77,3 +77,14 @@ def test_mcpat_failure_reported_cleanly(run_gem5, mcpat_bin, hello, tmp_path):
     failed = list((cache / "failed").iterdir())
     assert failed and str(failed[0]) in out
     assert "no valid data array" in (failed[0] / "stdout.txt").read_text()
+
+
+@pytest.mark.parametrize("args,msg", [
+    (["--l2_assoc", "12"], "--l2_assoc 12: McPAT requires a power of two"),
+    (["--l1d_size", "48KiB"], "--l1d_size 48KiB: McPAT requires a power of two"),
+])
+def test_non_power_of_two_geometry_rejected(run_gem5, hello, tmp_path, args, msg):
+    r = run_gem5(["--cpu_type", "O3", "--binary", hello, *args],
+                 outdir=tmp_path / "m5", cwd=tmp_path)
+    assert r.returncode != 0 and msg in r.stderr, r.stderr[-2000:]
+    assert "Traceback" not in r.stderr
