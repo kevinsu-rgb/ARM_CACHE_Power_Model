@@ -10,7 +10,10 @@ from gem5.components.boards.simple_board import SimpleBoard
 from gem5.resources.resource import BinaryResource
 from gem5.simulate.simulator import Simulator
 
+import m5
 from m5.objects import LRURP, FIFORP, TreePLRURP
+
+CLK_FREQ = "1GHz"
 
 # ----------------- CLI -----------------
 parser = argparse.ArgumentParser()
@@ -105,8 +108,8 @@ board = SimpleBoard(
         l3_replacement_policy=l3_policy,
     ),
     processor=processor,
-    memory=DualChannelDDR4_2400(size="2GB"),
-    clk_freq="1GHz",
+    memory=DualChannelDDR4_2400(size="2GiB"),
+    clk_freq=CLK_FREQ,
 )
 
 # Cache line size for the whole system
@@ -134,8 +137,8 @@ print(f"CPU type: {args.cpu_type}")
 print(f"Num cores: {processor.get_num_cores()}")
 
 print("\n--- Memory System ---")
-print("Memory: DualChannelDDR4_2400, size=2GB")
-print("Clock frequency:", board.clk_domain.clock)
+print("Memory: DualChannelDDR4_2400, size=2GiB")
+print(f"Clock frequency: {CLK_FREQ}")
 
 print("\n===== End Configuration =====\n")
 
@@ -150,11 +153,12 @@ original_pre_instantiate = board._pre_instantiate
 
 def patched_pre_instantiate(*p_args, **p_kwargs):
     """Call original pre_instantiate, then add power models."""
-    original_pre_instantiate(*p_args, **p_kwargs)
+    root = original_pre_instantiate(*p_args, **p_kwargs)
 
     # After caches are built & connected, attach power models
     board.get_cache_hierarchy().add_power_model()
     print("Power model added successfully!")
+    return root
 
 board._pre_instantiate = patched_pre_instantiate
 
@@ -162,4 +166,4 @@ board._pre_instantiate = patched_pre_instantiate
 sim = Simulator(board)
 print("Beginning simulation with power model...")
 sim.run()
-print("Statistics dumped to m5out/stats.txt")
+print(f"Statistics dumped to {m5.options.outdir}/stats.txt")

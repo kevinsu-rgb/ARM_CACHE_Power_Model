@@ -21,7 +21,7 @@ This project builds a custom three-level cache hierarchy for gem5 and attaches s
 ## Requirements
 
 - A gem5 build for ARM, for example:
-  - [gem5/build/ARM/gem5.opt](../gem5/build/ARM/gem5.opt)
+  - [/home/kevin/Projects/gem5/build/ARM/gem5.opt](/home/kevin/Projects/gem5/build/ARM/gem5.opt)
 - A cross-compiler for ARM64 Linux binaries
   - `aarch64-linux-gnu-gcc` is recommended
 - Python environment compatible with your gem5 build
@@ -49,7 +49,7 @@ Run the sample binary with the provided script:
 
 ```bash
 cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
-/home/kevin/Projects/gem5_projects/gem5/build/ARM/gem5.opt main.py \
+/home/kevin/Projects/gem5/build/ARM/gem5.opt main.py \
   --binary tests/test_sample_arm64
 ```
 
@@ -67,7 +67,7 @@ The launcher accepts the following common options:
 Example with custom cache sizes:
 
 ```bash
-/home/kevin/Projects/gem5_projects/gem5/build/ARM/gem5.opt main.py \
+/home/kevin/Projects/gem5/build/ARM/gem5.opt main.py \
   --binary tests/test_sample_arm64 \
   --l1i_size 16KiB \
   --l1d_size 16KiB \

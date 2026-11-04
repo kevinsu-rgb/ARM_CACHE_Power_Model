@@ -5,7 +5,7 @@
 ###############################
 
 # Default paths (you can change these)
-GEM5_BIN=~/Source-builds/gem5/build/ARM/gem5.opt
+GEM5_BIN=/home/kevin/Projects/gem5/build/ARM/gem5.opt
 MAIN_PY=main.py
 
 ##########################################

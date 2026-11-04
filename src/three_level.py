@@ -19,6 +19,7 @@ from m5.objects import (
     L2XBar,
     SystemXBar,
     SubSystem,
+    LRURP,
     PowerModel,
     MathExprPowerModel,
 )
@@ -53,10 +54,10 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
         self._l1i_assoc = l1i_assoc
         self._l2_assoc  = l2_assoc
         self._l3_assoc  = l3_assoc
-        self._l1d_replacement_policy = l1d_replacement_policy
-        self._l1i_replacement_policy = l1i_replacement_policy
-        self._l2_replacement_policy  = l2_replacement_policy
-        self._l3_replacement_policy  = l3_replacement_policy
+        self._l1d_replacement_policy = l1d_replacement_policy or LRURP()
+        self._l1i_replacement_policy = l1i_replacement_policy or LRURP()
+        self._l2_replacement_policy  = l2_replacement_policy or LRURP()
+        self._l3_replacement_policy  = l3_replacement_policy or LRURP()
 
         # High-bandwidth system crossbar.
         self.membus = SystemXBar(width=64)
@@ -130,7 +131,10 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
             replacement_policy=self._l2_replacement_policy,
         )
 
-        cluster.iptw_cache = MMUCache(size="8KiB", writeback_clean=False)
+        # gem5 25.1: ARM MMU exposes a single walker port (dptw only)
+        nwalk = len(core.get_mmu().walkerPorts())
+        if nwalk == 2:
+            cluster.iptw_cache = MMUCache(size="8KiB", writeback_clean=False)
         cluster.dptw_cache = MMUCache(size="8KiB", writeback_clean=False)
 
         cluster.l2_bus = L2XBar()
@@ -138,14 +142,20 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
         # Core <-> L1I/L1D + TLB walkers
         core.connect_icache(cluster.l1icache.cpu_side)
         core.connect_dcache(cluster.l1dcache.cpu_side)
-        core.connect_walker_ports(
-            cluster.iptw_cache.cpu_side, cluster.dptw_cache.cpu_side
-        )
+        if nwalk == 2:
+            core.connect_walker_ports(
+                cluster.iptw_cache.cpu_side, cluster.dptw_cache.cpu_side
+            )
+        else:
+            core.connect_walker_ports(
+                cluster.dptw_cache.cpu_side, cluster.dptw_cache.cpu_side
+            )
 
         # L1 / PTW caches -> L2 bus
         cluster.l1dcache.mem_side = cluster.l2_bus.cpu_side_ports
         cluster.l1icache.mem_side = cluster.l2_bus.cpu_side_ports
-        cluster.iptw_cache.mem_side = cluster.l2_bus.cpu_side_ports
+        if nwalk == 2:
+            cluster.iptw_cache.mem_side = cluster.l2_bus.cpu_side_ports
         cluster.dptw_cache.mem_side = cluster.l2_bus.cpu_side_ports
 
         # L2 <-> L2 bus and L3 bus
@@ -268,7 +278,6 @@ class L3Cache(Cache):
 #   L3: 80 pJ / access, 240 pJ / miss
 # Divide by simSeconds (global stat) to get average power.
 
-from m5.objects import PowerModel, MathExprPowerModel
 
 # --------------------------
 # L3 Cache Power Model
