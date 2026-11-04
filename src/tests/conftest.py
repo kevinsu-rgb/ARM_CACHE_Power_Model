@@ -38,3 +38,12 @@ def run_gem5(gem5_bin, project_root):
         )
 
     return _run
+
+
+@pytest.fixture(scope="session")
+def mcpat_bin(project_root) -> Path:
+    env = os.environ.get("MCPAT_BIN")
+    path = Path(env) if env else project_root / "tools/mcpat/mcpat"
+    if not path.exists():
+        pytest.skip(f"mcpat binary not found: {path}")
+    return path
