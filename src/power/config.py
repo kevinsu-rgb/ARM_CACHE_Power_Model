@@ -98,8 +98,10 @@ def validate(cfg: PowerConfig) -> None:
         raise ConfigError("num_cores must be >= 1")
     if cfg.clock_mhz <= 0:
         raise ConfigError("clock_mhz must be > 0")
-    if cfg.temperature_k <= 0:
-        raise ConfigError("temperature_k must be > 0")
+    if not (300 <= cfg.temperature_k <= 400 and cfg.temperature_k % 10 == 0):
+        raise ConfigError(
+            f"temperature_k {cfg.temperature_k} must be 300..400 and a multiple of 10 "
+            "(McPAT limitation)")
     if cfg.device_type not in DEVICE_TYPES:
         raise ConfigError(f"unknown device_type {cfg.device_type!r}")
     if not MIN_NODE_NM <= cfg.tech_node_nm <= MAX_NODE_NM:

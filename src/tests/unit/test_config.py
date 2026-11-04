@@ -63,3 +63,14 @@ def test_hash_stable_and_sensitive():
                 dataclasses.replace(c, core=dataclasses.replace(c.core, model="neoverse_v2"))]
     hashes = {config_hash(v, "abc", 1) for v in variants} | {h, config_hash(c, "def", 1), config_hash(c, "abc", 2)}
     assert len(hashes) == len(variants) + 3
+
+
+@pytest.mark.parametrize("t", [299, 305, 350.5, 410, 290])
+def test_validate_rejects_bad_temperature(t):
+    with pytest.raises(ConfigError):
+        validate(dataclasses.replace(base_cfg(), temperature_k=t))
+
+
+@pytest.mark.parametrize("t", [300, 350, 400])
+def test_validate_accepts_good_temperature(t):
+    validate(dataclasses.replace(base_cfg(), temperature_k=t))
