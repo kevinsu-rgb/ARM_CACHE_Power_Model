@@ -107,9 +107,13 @@ def characterize(cfg: PowerConfig, runner: Runner, mcpat_sha: str) -> Coefficien
         SuperpositionError: the all-events run is not the sum of single-event runs.
     """
     base_cyc = {i: C0 for i in range(cfg.num_cores)}
-    sysc = 2 * C0
+    base_sys = 2 * C0
+    # McPAT charges every core a base energy per SYSTEM cycle (system
+    # total_cycles), independent of the core's own total_cycles.
+    cyc_sys = base_sys + N_EVENT
+    cyc_core = {i: C0 + N_EVENT for i in range(cfg.num_cores)}
 
-    def run(label: str, counts: dict, cyc: dict) -> McpatResult:
+    def run(label: str, counts: dict, cyc: dict, sysc: int = base_sys) -> McpatResult:
         xml = build_xml(cfg, counts, sysc, cyc)
         try:
             return runner(xml)
@@ -126,10 +130,8 @@ def characterize(cfg: PowerConfig, runner: Runner, mcpat_sha: str) -> Coefficien
 
     def one(e: str) -> dict[str, float]:
         if e == "core.cycles":
-            counts, cyc = {}, {**base_cyc, 0: C0 + N_EVENT}
-        else:
-            counts, cyc = {(0, e): N_EVENT}, dict(base_cyc)
-        return component_energies(run(e, counts, cyc))
+            return component_energies(run(e, {}, cyc_core, cyc_sys))
+        return component_energies(run(e, {(0, e): N_EVENT}, dict(base_cyc)))
 
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex:
         results = list(ex.map(one, events))
@@ -142,7 +144,7 @@ def characterize(cfg: PowerConfig, runner: Runner, mcpat_sha: str) -> Coefficien
                 energy_j[c][e] = v
 
     all_counts = {(0, e): N_EVENT for e in events if e != "core.cycles"}
-    eall = component_energies(run("all", all_counts, {**base_cyc, 0: C0 + N_EVENT}))
+    eall = component_energies(run("all", all_counts, cyc_core, cyc_sys))
     deviations: dict[str, float] = {}
     bad = []
     for c in COMPONENTS:

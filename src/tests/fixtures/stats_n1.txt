@@ -518,7 +518,7 @@ board.processor.cores.core.mmu.walker.requestOrigin_Requested::total            
 board.processor.cores.core.mmu.walker.requestOrigin_Completed::total            0
 board.processor.cores.core.mmu.walker.requestOrigin::total            0
 board.processor.cores.core.mmu.walker.walks            0
-board.processor.cores.core.power_model.dynamicPower     0.056985
+board.processor.cores.core.power_model.dynamicPower     0.325797
 board.processor.cores.core.power_model.staticPower     0.456703
 board.processor.cores.core.rename.renamedInsts        99800
 board.processor.cores.core.rename.squashedInsts          568

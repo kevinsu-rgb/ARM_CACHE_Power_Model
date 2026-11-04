@@ -12,6 +12,7 @@ _CORE = "{core}"
 
 # Rows shared by O3 and MINOR: event -> template.
 _CORE_COMMON: dict[str, str] = {
+    # idle/suspended cores report numCycles = 0, deliberately modelling them as clock-gated (leakage only)
     "core.cycles": "{core}.numCycles",
     "core.int_insts": "{core}.commitStats0.numIntInsts",
     # proxy: ARM FP/SIMD activity is reported in the Vec* stats

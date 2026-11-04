@@ -1,6 +1,6 @@
 {
-  "config_hash": "11d47862ef9f6609",
-  "coefficients_path": "/home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/power_cache/11d47862ef9f6609.json",
+  "config_hash": "0edbab0442f230f8",
+  "coefficients_path": "/home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/power_cache/0edbab0442f230f8.json",
   "cpu_type": "O3",
   "core_model": "o3_arm_v7a",
   "num_cores": 2,

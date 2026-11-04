@@ -1,4 +1,5 @@
 import json
+import re
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -13,6 +14,7 @@ from power.mcpat_runner import ComponentPower, McpatError
 
 _STATS = sorted({(e.target, s) for e in EVENTS.values() for s in e.increments})
 W = {k: (i + 1) * 1e-12 for i, k in enumerate(_STATS)}
+W_CYC = 3.5e-13  # fake McPAT energy per SYSTEM cycle, charged to every core
 LEAK = {"core": 1.0, "l1i": 0.1, "l1d": 0.2, "l2": 0.3, "l3": 0.4}
 _CID = {"system.core0": "core", "system.core0.icache": "l1i",
         "system.core0.dcache": "l1d", "system.L20": "l2", "system.L30": "l3"}
@@ -22,7 +24,13 @@ def _cp(e, leak):
     return ComponentPower(runtime_dynamic_energy_j=e, subthreshold_leakage_w=leak)
 
 
+_SUFFIX = {"": "core", "icache": "l1i", "dcache": "l1d"}
+
+
 class FakeRunner:
+    """Models McPAT: core energy has a base term proportional to the system
+    component's total_cycles (per core), independent of the core's own cycles."""
+
     def __init__(self, weights, quadratic_on=None):
         self.w, self.q = weights, quadratic_on
         self.calls = 0
@@ -31,31 +39,52 @@ class FakeRunner:
         self.calls += 1
         root = ET.fromstring(xml_text)
         vals = {}
+        cores = set()
+        sys_cycles = 0.0
         for c in root.iter("component"):
-            comp = _CID.get(c.get("id"))
-            if comp is None:
+            cid = c.get("id")
+            if cid == "system":
+                for s in c.findall("stat"):
+                    if s.get("name") == "total_cycles":
+                        sys_cycles = float(s.get("value"))
+                continue
+            m = re.fullmatch(r"system\.core(\d+)(?:\.(icache|dcache))?", cid or "")
+            if m:
+                comp = _SUFFIX[m.group(2) or ""]
+                idx = int(m.group(1))
+                cores.add(idx)
+            elif cid == "system.L20":
+                comp, idx = "l2", 0
+            elif cid == "system.L30":
+                comp, idx = "l3", 0
+            else:
                 continue
             for s in c.findall("stat"):
                 try:
-                    vals[(comp, s.get("name"))] = float(s.get("value"))
+                    vals[(idx, comp, s.get("name"))] = float(s.get("value"))
                 except ValueError:
                     pass
         coupling = 1.0
         if self.q:
-            total = sum(v for (c, n), v in vals.items() if n == self.q)
+            total = sum(v for (i, c, n), v in vals.items() if n == self.q)
             coupling = 1.0 + 0.1 * total / 1e6
-        e = {c: 0.0 for c in LEAK}
-        for (c, n), v in vals.items():
-            e[c] += self.w.get((c, n), 0.0) * v * coupling
-        core = ("System", "Core 0")
-        return {
-            ("System",): _cp(0, 0),
-            core: _cp(e["core"] + e["l1i"] + e["l1d"], LEAK["core"] + LEAK["l1i"] + LEAK["l1d"]),
-            core + ("Instruction Fetch Unit", "Instruction Cache"): _cp(e["l1i"], LEAK["l1i"]),
-            core + ("Load/Store Unit", "Data Cache"): _cp(e["l1d"], LEAK["l1d"]),
-            ("System", "L2 Cache 0"): _cp(e["l2"], LEAK["l2"]),
-            ("System", "L3 Cache"): _cp(e["l3"], LEAK["l3"]),
-        }
+        out = {("System",): _cp(0, 0), ("System", "L3 Cache"): _cp(0, LEAK["l3"])}
+        for i in sorted(cores):
+            e = {c: 0.0 for c in LEAK}
+            for (j, c, n), v in vals.items():
+                if n == "total_cycles":
+                    continue  # real McPAT ignores a core's own total_cycles
+                if j == i or c in ("l2", "l3"):
+                    e[c] += self.w.get((c, n), 0.0) * v * coupling
+            e["core"] += W_CYC * sys_cycles
+            core = ("System", f"Core {i}")
+            out[core] = _cp(e["core"] + e["l1i"] + e["l1d"],
+                            LEAK["core"] + LEAK["l1i"] + LEAK["l1d"])
+            out[core + ("Instruction Fetch Unit", "Instruction Cache")] = _cp(e["l1i"], LEAK["l1i"])
+            out[core + ("Load/Store Unit", "Data Cache")] = _cp(e["l1d"], LEAK["l1d"])
+            out[("System", f"L2 Cache {i}")] = _cp(e["l2"], LEAK["l2"])
+            out[("System", "L3 Cache")] = _cp(e["l3"], LEAK["l3"])
+        return out
 
 
 def test_recovers_linear_coefficients_exactly():
@@ -65,6 +94,22 @@ def test_recovers_linear_coefficients_exactly():
         sum(W[("core", s)] for s in EVENTS["core.int_insts"].increments))
     assert co.leakage_w["l3"] == pytest.approx(LEAK["l3"])
     assert co.leakage_w["core"] == pytest.approx(LEAK["core"])
+
+
+def _assert_cycles_only_core(co):
+    assert co.energy_j["core"]["core.cycles"] == pytest.approx(W_CYC)
+    for c in ("l1i", "l1d", "l2", "l3"):
+        assert co.energy_j[c].get("core.cycles", 0.0) == 0.0
+
+
+def test_recovers_system_cycle_energy():
+    _assert_cycles_only_core(characterize(base_cfg(), FakeRunner(W), "sha"))
+
+
+def test_recovers_system_cycle_energy_two_cores():
+    # Every core is charged W_CYC per system cycle; attribution is per core,
+    # not system-wide (core 0's coefficient must not be doubled).
+    _assert_cycles_only_core(characterize(cfg(num_cores=2), FakeRunner(W), "sha"))
 
 
 def test_nonlinear_runner_trips_superposition():
@@ -160,6 +205,14 @@ def test_real_characterization_o3_28nm(tmp_path, mcpat_bin):
     assert co.implied_vdd == 0.6
     assert all(co.leakage_w[c] > 0 for c in ch.COMPONENTS)
     assert co.energy_j["l1d"]["l1d.read_accesses"] > 0
+    assert co.energy_j["core"]["core.cycles"] == pytest.approx(2.688e-10, rel=0.01)
+
+
+@pytest.mark.mcpat
+def test_real_characterization_inorder_28nm(tmp_path, mcpat_bin):
+    c = cfg(cpu_type="MINOR", core=HPI_FALLBACK_CORE)
+    co, _ = get_coefficients(c, mcpat_bin, tmp_path)
+    assert co.energy_j["core"]["core.cycles"] == pytest.approx(4.13e-11, rel=0.01)
 
 
 @pytest.mark.mcpat

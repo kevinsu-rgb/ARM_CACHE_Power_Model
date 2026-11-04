@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 
 DEVICE_TYPES = {"HP": 0, "LSTP": 1, "LOP": 2}
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CPU_TYPES = ("O3", "MINOR", "TIMING", "ATOMIC")
 CACHE_NAMES = ("l1i", "l1d", "l2", "l3")
 MIN_NODE_NM = 22
