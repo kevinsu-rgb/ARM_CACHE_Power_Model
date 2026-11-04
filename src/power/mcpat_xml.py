@@ -559,8 +559,6 @@ L2_PARAMS = {'level': '2',
 L2_STATS = ['read_accesses', 'write_accesses', 'read_misses', 'write_misses', 'conflicts', 'duty_cycle']
 
 
-CACHE_STAT_NAMES = ("read_accesses", "write_accesses", "read_misses", "write_misses",
-                    "conflicts", "duty_cycle")
 _TARGET_ID = {"l1i": "icache", "l1d": "dcache"}
 _LEVEL = {"l1i": 1, "l1d": 1, "l2": 2, "l3": 3}
 
@@ -621,7 +619,9 @@ def _core_params(cfg: PowerConfig) -> dict[str, str]:
 
 def _cache_params(cfg: PowerConfig, target: str) -> dict[str, str]:
     base = {"l1i": L1I_PARAMS, "l1d": L1D_PARAMS, "l2": L2_PARAMS, "l3": L2_PARAMS}[target]
-    cp: CacheParams = next(c for c in cfg.caches if c.name == target)
+    cp: CacheParams | None = next((c for c in cfg.caches if c.name == target), None)
+    if cp is None:
+        raise ValueError(f"cfg.caches has no entry for {target!r}")
     p = dict(base)
     p.update(level=str(_LEVEL[target]), size=str(cp.size_bytes), assoc=str(cp.assoc),
              block_size=str(cp.block_size), latency=str(cp.latency_cycles),
@@ -718,18 +718,18 @@ def build_xml(cfg: PowerConfig, counts: ActivityCounts, system_cycles: int,
         _add(core, f"{cid}.itlb", "itlb", "InstructionTLB", itlb, stats(f"{cid}.itlb", itlb_s))
         _add(core, f"{cid}.icache", "Instruction Cache", "CacheUnit",
              _cache_params(cfg, "l1i"),
-             stats(f"{cid}.icache", _cache_base_stats("l1i"), CACHE_STAT_NAMES))
+             stats(f"{cid}.icache", _cache_base_stats("l1i")))
         _add(core, f"{cid}.dtlb", "dtlb", "DataTLB", dtlb, stats(f"{cid}.dtlb", dtlb_s))
         _add(core, f"{cid}.dcache", "Data Cache", "CacheUnit",
              _cache_params(cfg, "l1d"),
-             stats(f"{cid}.dcache", _cache_base_stats("l1d"), CACHE_STAT_NAMES))
+             stats(f"{cid}.dcache", _cache_base_stats("l1d")))
         _add(core, f"{cid}.btargetbuf", "btargetbuf", "BranchTargetBuffer", BTB_PARAMS,
              stats(f"{cid}.btargetbuf", BTB_STATS))
     for i in range(cfg.num_cores):
         _add(system, f"system.L2{i}", f"L2 Cache {i}", "CacheUnit", _cache_params(cfg, "l2"),
-             stats(f"system.L2{i}", _cache_base_stats("l2"), CACHE_STAT_NAMES))
+             stats(f"system.L2{i}", _cache_base_stats("l2")))
     _add(system, "system.L30", "L3 Cache", "CacheUnit", _cache_params(cfg, "l3"),
-         stats("system.L30", _cache_base_stats("l3"), CACHE_STAT_NAMES))
+         stats("system.L30", _cache_base_stats("l3")))
 
     ET.indent(root)
     return ET.tostring(root, encoding="unicode")

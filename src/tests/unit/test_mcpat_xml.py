@@ -128,3 +128,37 @@ def test_every_event_maps_to_existing_stat(c):
     kind = c.core.kind
     counts = {(0, e): 1 for e in events_for(kind) if e != "core.cycles"}
     build_xml(c, counts, 1, {0: 1})
+
+
+def test_l1i_write_accesses_not_an_event():
+    assert "l1i.write_accesses" not in EVENTS
+    assert "l1d.write_accesses" in EVENTS
+
+
+def test_missing_cache_entry_is_value_error():
+    c = cfg(caches=base_cfg().caches[:3])
+    with pytest.raises(ValueError, match="l3"):
+        build_xml(c, {}, 1, {0: 1})
+
+
+@pytest.mark.mcpat
+@pytest.mark.parametrize("c", [base_cfg(), cfg(cpu_type="MINOR", core=HPI_FALLBACK_CORE)],
+                         ids=["ooo", "inorder"])
+def test_each_event_changes_mcpat_energy(mcpat_bin, tmp_path, c):
+    from concurrent.futures import ThreadPoolExecutor
+
+    def energy(name, counts):
+        d = tmp_path / name
+        d.mkdir()
+        r = run_mcpat(build_xml(c, counts, 2_000_000, {0: 1_000_000}), mcpat_bin, d)
+        return r[("System",)].runtime_dynamic_energy_j
+
+    events = [e for e in events_for(c.core.kind) if e != "core.cycles"]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        base_f = ex.submit(energy, "base", {})
+        futs = {e: ex.submit(energy, f"ev{i}", {(0, e): 1_000_000})
+                for i, e in enumerate(events)}
+        base = base_f.result()
+        deltas = {e: f.result() - base for e, f in futs.items()}
+    dead = {e: d for e, d in deltas.items() if not d > 0}
+    assert not dead, f"events with no McPAT energy effect (base={base}): {dead}"

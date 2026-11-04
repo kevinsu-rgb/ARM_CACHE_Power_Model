@@ -36,7 +36,7 @@ EVENTS: dict[str, EventSpec] = {
     "core.load_insts": _core("load_instructions"),
     "core.store_insts": _core("store_instructions"),
     "core.branch_insts": _core("branch_instructions"),
-    "core.branch_mispredicts": _core("branch_mispredictions"),
+    # core.branch_mispredicts removed: McPAT ignores branch_mispredictions (zero energy delta).
     "core.ialu": _core("ialu_accesses", "cdb_alu_accesses"),
     "core.fpu": _core("fpu_accesses", "cdb_fpu_accesses"),
     "core.int_rf_reads": _core("int_regfile_reads"),
@@ -57,7 +57,9 @@ EVENTS: dict[str, EventSpec] = {
 }
 for _t in ("l1i", "l1d", "l2", "l3"):
     for _s in ("read_accesses", "write_accesses", "read_misses"):
-        EVENTS[f"{_t}.{_s}"] = EventSpec(_t, {_s: 1})
+        # The McPAT icache has no write_accesses stat, so that event would be dead.
+        if (_t, _s) != ("l1i", "write_accesses"):
+            EVENTS[f"{_t}.{_s}"] = EventSpec(_t, {_s: 1})
 
 
 def events_for(kind: str) -> list[str]:
