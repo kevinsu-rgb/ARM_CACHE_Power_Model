@@ -16,7 +16,14 @@ def _attach(obj, dyn: str, st: str) -> None:
 
     obj.power_state.default_state = "ON"
     pm = PowerModel()
-    pm.pm = [mk(dyn, st), mk("0", st), mk("0", "0"), mk("0", "0")]
+    # gem5 reports dynamicPower = sum_s residency[s] * pm[s].dyn. ``dyn`` is
+    # already a whole-run average (sum e*count / simSeconds), and the counts
+    # do not grow while the object is gated, so using it only in ON would
+    # report w_ON * E/T. The same ``dyn`` in every state makes the weights
+    # (which sum to 1) cancel, giving exactly E/T. Leakage is kept in ON and
+    # CLK_GATED and is zero in SRAM_RETENTION and OFF.
+    # Order: ON, CLK_GATED, SRAM_RETENTION, OFF.
+    pm.pm = [mk(dyn, st), mk(dyn, st), mk(dyn, "0"), mk(dyn, "0")]
     obj.power_model = pm
 
 

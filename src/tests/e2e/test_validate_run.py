@@ -70,3 +70,19 @@ def test_validate_small_loop(run_gem5, mcpat_bin, project_root, tmp_path):
     l3_dyn, _ = _power(text, r"l3_cache")
     print("l1d dyn", l1d_dyn, "l3 dyn", l3_dyn)
     assert l1d_dyn > l3_dyn
+
+
+@pytest.fixture
+def threads(project_root):
+    return str(project_root / "src/tests/threads_arm64")
+
+
+# threads_arm64 on 2 cores leaves core 0 CLK_GATED for part of the run (while
+# it waits in join()); the reported dynamic power must still equal E/T.
+@pytest.mark.parametrize("cpu", ["MINOR", "O3"])
+def test_validate_threads_two_cores_partly_gated(run_gem5, mcpat_bin, project_root,
+                                                 threads, tmp_path, cpu):
+    out = _run(run_gem5, tmp_path, ["--cpu_type", cpu, "--num_cores", "2",
+                                    "--binary", threads])
+    r = _validate(project_root, out, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr

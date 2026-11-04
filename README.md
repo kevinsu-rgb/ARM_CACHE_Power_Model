@@ -57,6 +57,15 @@ clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -static -O2 \
   -o tests/test_sample_arm64 tests/test_sample.c
 ```
 
+The multithreaded test binary `src/tests/threads_arm64` is gem5's `tests/test-progs/threads` program (source copied to `src/tests/threads.cpp`). It was built from the project root with:
+
+```bash
+/tools/AMD/2025.2/gnu/aarch64/lin/aarch64-linux/bin/aarch64-linux-gnu-g++ -O2 -static -pthread \
+  -o src/tests/threads_arm64 src/tests/threads.cpp
+```
+
+Run it with `--num_cores 2` (or more). It exercises cores that are clock-gated for part of the run.
+
 ## Run a simulation
 
 From `src/`:
@@ -145,7 +154,9 @@ The defaults are 28 nm (interpolated between McPAT's 32 nm and 22 nm data), LOP 
 | MINOR | `HPI` | A53-class |
 | TIMING, ATOMIC | none | cache power only, with a warning |
 
-Clock term: McPAT charges each core a per-cycle clock/pipeline base energy. For an O3 A15-class core at 28 nm LOP this is about 2.69e-10 J/cycle (about 0.27 W at 1 GHz); for an in-order core it is about 4.1e-11 J/cycle. gem5 applies it per core using `numCycles`. Idle or suspended cores report `numCycles` = 0, so they are modelled as clock-gated: leakage only.
+Clock term: McPAT charges each core a per-cycle clock/pipeline base energy. For an O3 A15-class core at 28 nm LOP this is about 2.69e-10 J/cycle (about 0.27 W at 1 GHz); for an in-order core it is about 4.1e-11 J/cycle. gem5 applies it per core using `numCycles`, which counts only the cycles in which the core was clocked. A core that never runs reports `numCycles` = 0, and a core that is suspended for part of the run (for example a thread blocked in `join()`) stops counting while it sleeps. Such cores pay the clock term only for their active cycles; leakage is charged for the whole run.
+
+Every power model uses the same dynamic expression in all four gem5 power states (ON, CLK_GATED, SRAM_RETENTION, OFF). gem5 weights each state's value by its residency, and the expression is already a whole-run average (energy / `simSeconds`), so `dynamicPower` is exactly the run's dynamic energy divided by its duration even when gem5 clock-gates the core part of the time.
 
 ### Scope
 
@@ -185,7 +196,7 @@ From `src/`:
 python3 validate_mcpat.py --outdir m5out
 ```
 
-This re-runs McPAT on the finished run's real event counts and compares per-component dynamic energy and leakage with gem5's numbers, within `--tolerance` (default 1%). Core rows are adjusted for the clock term on idle or partly idle cores. Rows limited by McPAT's 6-digit print precision are flagged `PRECISION-LIMITED`. Measured agreement is 0.2% or better on the bundled tests. `--mcpat_bin` overrides the McPAT binary.
+This re-runs McPAT on the finished run's real event counts and compares per-component dynamic energy and leakage with gem5's numbers, within `--tolerance` (default 1%). McPAT charges every core its clock term for every system cycle, while gem5 charges it only for the core's own `numCycles`. The validator therefore subtracts `e_cyc x (system_cycles - numCycles_i)` from McPAT's energy on every core row: fully idle cores, cores that were suspended for part of the run, and fully busy cores (where the correction is close to 0). Both the raw and the adjusted McPAT values are printed. Rows limited by McPAT's 6-digit print precision are flagged `PRECISION-LIMITED`. Measured agreement is 0.2% or better on the bundled tests. `--mcpat_bin` overrides the McPAT binary.
 
 ## Tests
 
