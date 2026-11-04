@@ -1,38 +1,52 @@
 # ARM Cache Power Model
 
-This project builds a custom three-level cache hierarchy for gem5 and attaches simple power models to the L1/L2/L3 caches. It is designed for ARM SE-mode simulations and is meant to be run with an ARM build of gem5.
+This project builds a configurable ARM gem5 system (O3, Minor, Timing or Atomic CPUs) with a private L1I/L1D, a private L2 and a shared L3, and attaches a McPAT-calibrated power model to the cores and caches. It is designed for ARM64 SE-mode simulations.
 
 ## What this project does
 
-- Creates a private L1 instruction cache, private L1 data cache, private L2 cache, and shared L3 cache
-- Configures the hierarchy through a custom gem5 component in [src/three_level.py](src/three_level.py)
-- Attaches power models to each cache level during simulation setup
+- Builds the hierarchy with a custom gem5 component in [src/three_level.py](src/three_level.py)
 - Runs a user-specified ARM64 Linux binary through [src/main.py](src/main.py)
+- Characterizes each core and cache with McPAT, then installs gem5 `MathExprPowerModel` objects so that gem5 reports dynamic and static power in `stats.txt`
+- Extracts a one-row CSV of results ([src/extract_gem5_stats.py](src/extract_gem5_stats.py))
+- Cross-checks gem5's numbers against a full McPAT evaluation ([src/validate_mcpat.py](src/validate_mcpat.py))
 
-# Cache Hierarchy Block Diagram
-![Alt text](/images/Cache_Hierarchy.png)
+## Cache Hierarchy Block Diagram
+
+![Cache hierarchy block diagram](images/Cache_Hierarchy.png)
 
 ## Project structure
 
-- [src/main.py](src/main.py) — command-line entrypoint for launching gem5 simulations
-- [src/three_level.py](src/three_level.py) — custom cache hierarchy and power-model definitions
-- [src/tests/test_sample.c](src/tests/test_sample.c) — simple sample C program
+All paths are relative to the project root.
+
+- `src/main.py`: command-line entrypoint for launching gem5 simulations
+- `src/three_level.py`: custom cache hierarchy
+- `src/power/`: McPAT characterization, caching and the power-model builder
+- `src/extract_gem5_stats.py`: turns `stats.txt` into a CSV row
+- `src/validate_mcpat.py`: McPAT cross-check of a finished run
+- `src/run_gem5.sh`, `src/execute_command`: wrapper script and example invocations
+- `src/tests/`: unit, end-to-end and slow tests, plus a sample C program
+- `power_cache/`: cached characterization results (created on demand, git-ignored)
+- `tools/mcpat/mcpat`: McPAT binary (built locally, git-ignored)
 
 ## Requirements
 
-- A gem5 build for ARM, for example:
-  - [/home/kevin/Projects/gem5/build/ARM/gem5.opt](/home/kevin/Projects/gem5/build/ARM/gem5.opt)
-- A cross-compiler for ARM64 Linux binaries
-  - `aarch64-linux-gnu-gcc` is recommended
-- Python environment compatible with your gem5 build
+- gem5 25.1 with an ARM build at `/home/kevin/Projects/gem5` (binary: `/home/kevin/Projects/gem5/build/ARM/gem5.opt`)
+- McPAT, built from gem5's bundled sources into `tools/` (run from the project root):
+
+  ```bash
+  make -C /home/kevin/Projects/gem5/ext/mcpat BUILD_DIR=$PWD/tools -j8
+  ```
+
+  This produces `tools/mcpat/mcpat`. It is the AMD-refactored McPAT 0.8 that ships with gem5.
+- A cross-compiler for ARM64 Linux binaries (`aarch64-linux-gnu-gcc` is recommended)
+- A Python environment with `pytest` for the tests
 
 ## Build a sample ARM64 program
 
-From the project source directory:
+From the project root:
 
 ```bash
-cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
-
+cd src
 aarch64-linux-gnu-gcc -static -o tests/test_sample_arm64 tests/test_sample.c
 ```
 
@@ -45,45 +59,139 @@ clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -static -O2 \
 
 ## Run a simulation
 
-Run the sample binary with the provided script:
+From `src/`:
 
 ```bash
-cd /home/kevin/Projects/gem5_projects/ARM_CACHE_Power_Model/src
 /home/kevin/Projects/gem5/build/ARM/gem5.opt main.py \
   --binary tests/test_sample_arm64
 ```
 
-## Useful options
+Or use the wrapper, which also runs `extract_gem5_stats.py` afterwards and writes `<outdir>/filtered_stats.csv`:
 
-The launcher accepts the following common options:
+```bash
+bash run_gem5.sh --binary tests/test_sample_arm64 [benchmark args] [options]
+```
 
-- `--binary` — path to the ARM64 binary to execute
-- `--l1i_size`, `--l1d_size`, `--l2_size`, `--l3_size` — cache sizes
-- `--l1i_assoc`, `--l1d_assoc`, `--l2_assoc`, `--l3_assoc` — cache associativity
-- `--block_size` — cache line size in bytes
-- `--l1i_replacement_policy`, `--l1d_replacement_policy`, `--l2_replacement_policy`, `--l3_replacement_policy` — replacement policy (`LRURP`, `FIFORP`, `TreePLRURP`)
-- `--cpu_type` — CPU model (`TIMING`, `ATOMIC`, `KVM`)
+The wrapper accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. Set `PYTHON` to choose the interpreter used for extraction (default `python3`). `src/execute_command` has example invocations.
 
-Example with custom cache sizes:
+Example with custom cache sizes and a different core:
 
 ```bash
 /home/kevin/Projects/gem5/build/ARM/gem5.opt main.py \
   --binary tests/test_sample_arm64 \
-  --l1i_size 16KiB \
-  --l1d_size 16KiB \
-  --l2_size 128KiB \
-  --l3_size 1MiB
+  --l1i_size 16KiB --l1d_size 16KiB --l2_size 128KiB --l3_size 1MiB \
+  --cpu_type MINOR
 ```
+
+Outputs go to `m5out/` (or the `-d` directory): `stats.txt` and `power_meta.json`.
+
+## Options
+
+Cache options:
+
+- `--binary`: path to the ARM64 binary; any trailing arguments go to the benchmark
+- `--l1i_size`, `--l1d_size`, `--l2_size`, `--l3_size`: cache sizes
+- `--l1i_assoc`, `--l1d_assoc`, `--l2_assoc`, `--l3_assoc`: associativity
+- `--block_size`: cache line size in bytes
+- `--l1i_replacement_policy`, `--l1d_replacement_policy`, `--l2_replacement_policy`, `--l3_replacement_policy`: `LRURP`, `FIFORP`, `TreePLRURP`
+
+CPU and power-model options:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--cpu_type` | `O3` | `O3`, `MINOR`, `TIMING` or `ATOMIC` |
+| `--core_model` | `o3_arm_v7a` (O3 only) | `o3_arm_v7a` or `neoverse_v2`; invalid with other CPU types |
+| `--num_cores` | `1` | number of cores |
+| `--clk_freq` | `1GHz` | core clock |
+| `--tech_node` | `28` | technology node in nm, valid range 22 to 90 |
+| `--device_type` | `LOP` | `HP`, `LOP` or `LSTP` |
+| `--temperature` | `350` | kelvin, 300 to 400 in steps of 10 |
+| `--gem5_root` | `/home/kevin/Projects/gem5` | gem5 checkout (or env `GEM5_ROOT`) |
+| `--mcpat_bin` | `tools/mcpat/mcpat` | McPAT binary |
+| `--power_cache_dir` | `power_cache/` | characterization cache directory |
+
+## Power model
+
+### Method
+
+1. McPAT is run at zero activity. Each component's leakage is its static power.
+2. McPAT is run once per event type at 1e6 counts. The difference from the zero-activity run gives the energy per event, for each component (core, L1I, L1D, L2, L3).
+3. A combined run with all events checks that the energies superpose to within 1%.
+4. The results are cached as JSON in `power_cache/`, keyed by a hash of the configuration.
+5. gem5's `MathExprPowerModel` then computes, per component:
+   - dynamic W = sum(energy x stat) / simSeconds
+   - static W = leakage
+
+DRAM energy comes from gem5's own DRAMPower statistics, not from McPAT.
+
+The first run of a new configuration spends about 90 s characterizing. Later runs with the same configuration hit the cache. To clear the cache, delete `power_cache/`.
+
+### Defaults and voltage
+
+The defaults are 28 nm (interpolated between McPAT's 32 nm and 22 nm data), LOP devices, 350 K and 1 GHz. There is no voltage flag by design: McPAT derives Vdd from the node and device type. At 28 nm the implied values are:
+
+| Device type | Implied Vdd |
+|---|---|
+| LOP | 0.60 V |
+| HP | 0.86 V |
+| LSTP | 0.92 V |
+
+### Cores
+
+| `--cpu_type` / `--core_model` | McPAT/gem5 core | Notes |
+|---|---|---|
+| O3 + `o3_arm_v7a` (default) | `O3_ARM_v7a_3` | A15-class |
+| O3 + `neoverse_v2` | `NeoverseV2` | prints a warning: absolute power is overstated, because real V2 silicon is 4 to 5 nm |
+| MINOR | `HPI` | A53-class |
+| TIMING, ATOMIC | none | cache power only, with a warning |
+
+Clock term: McPAT charges each core a per-cycle clock/pipeline base energy. For an O3 A15-class core at 28 nm LOP this is about 2.69e-10 J/cycle (about 0.27 W at 1 GHz); for an in-order core it is about 4.1e-11 J/cycle. gem5 applies it per core using `numCycles`. Idle or suspended cores report `numCycles` = 0, so they are modelled as clock-gated: leakage only.
+
+### Scope
+
+Modelled: each core, L1I, L1D, L2 and the shared L3, plus DRAM energy from gem5's DRAMPower stats.
+
+Not modelled: crossbars and buses, the memory controller, page-table-walker caches, the I/O cache, thermal feedback, DVFS and voltage scaling, and calibration against real silicon.
+
+### Limitations
+
+- No calibration against hardware. Numbers are McPAT-model estimates, not measurements.
+- There is no multiply event and no cache write-miss event. gem5 exposes these only as Vector stats, which `MathExprPowerModel` cannot evaluate, so write misses are priced as read misses.
+- There is no branch-mispredict event, because McPAT's runtime energy does not change with it (measured).
+- There is no L1I write event, because McPAT's icache has no write port stat.
+- O3 branch counts include squashed branches.
+- ARM FP/SIMD activity is counted from gem5's `Vec*` stats.
+- The Neoverse V2 model overstates absolute power, because real V2 silicon is 4 to 5 nm and the model only supports nodes of 22 nm and larger.
+- The technology node must be in 22 to 90 nm.
+
+### Example numbers
+
+For `src/tests/small_loop` (O3, `o3_arm_v7a`, 1 core, 28 nm LOP, 1 GHz): core dynamic is about 0.40 W and core static about 0.46 W; L1D dynamic is about 0.015 W; L3 dynamic is about 0.002 W. These are illustrative outputs of the model, not a claim about real hardware.
 
 ## Expected output
 
-A successful run prints the program output and writes statistics to:
+A successful run prints the program output and writes `m5out/stats.txt` and `m5out/power_meta.json`. The wrapper also writes `m5out/filtered_stats.csv`. To produce the CSV by hand, from `src/`:
 
-```text
-m5out/stats.txt
+```bash
+python3 extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats.csv \
+  --benchmark test_sample_arm64 --benchmark_args ""
 ```
 
-## Notes
+## Validate against McPAT
 
-- The current setup is intended for simple SE-mode ARM workloads.
-- The power model is attached after the board pre-instantiation step so that the cache objects exist before the model is wired up.
+From `src/`:
+
+```bash
+python3 validate_mcpat.py --outdir m5out
+```
+
+This re-runs McPAT on the finished run's real event counts and compares per-component dynamic energy and leakage with gem5's numbers, within `--tolerance` (default 1%). Core rows are adjusted for the clock term on idle or partly idle cores. Rows limited by McPAT's 6-digit print precision are flagged `PRECISION-LIMITED`. Measured agreement is 0.2% or better on the bundled tests. `--mcpat_bin` overrides the McPAT binary.
+
+## Tests
+
+From the project root, with `PY` set to your Python interpreter:
+
+```bash
+$PY -m pytest -m "not slow"   # unit + end-to-end; several minutes on a cold cache
+$PY -m pytest                 # everything, including slow tests
+```
