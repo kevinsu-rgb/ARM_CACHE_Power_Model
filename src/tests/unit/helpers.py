@@ -1,4 +1,6 @@
 """Shared test helpers."""
+import dataclasses
+
 from power.config import CacheParams, CoreParams, PowerConfig
 
 
@@ -16,3 +18,8 @@ def base_cfg() -> PowerConfig:
     return PowerConfig(cpu_type="O3", core=core, caches=caches, num_cores=1,
                        clock_mhz=1000, tech_node_nm=28, device_type="LOP",
                        temperature_k=350)
+
+
+def cfg(**overrides) -> PowerConfig:
+    """base_cfg() with the given PowerConfig fields replaced."""
+    return dataclasses.replace(base_cfg(), **overrides)
