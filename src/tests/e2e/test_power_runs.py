@@ -49,6 +49,7 @@ def test_timing_cache_only(run_gem5, hello, tmp_path):
     assert r.returncode == 0
     ps = power_stats((tmp_path / "m5/stats.txt").read_text())
     assert len(ps) == 4 and not any(".processor." in p for p in ps)
+    assert all(st > 0 for _, st in ps.values())
     assert r.stdout.count("has no core power model") == 1
 
 

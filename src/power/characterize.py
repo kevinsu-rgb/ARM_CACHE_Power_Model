@@ -17,7 +17,7 @@ from typing import Any
 
 from power.config import (SCHEMA_VERSION, PowerConfig, config_from_dict,
                           config_hash, config_to_dict, implied_vdd)
-from power.events import events_for
+from power.events import EVENTS, events_for
 from power.mcpat_runner import (McpatError, McpatResult, find_mcpat_bin,
                                 mcpat_sha256, run_mcpat)
 from power.mcpat_xml import build_xml
@@ -27,6 +27,7 @@ N_EVENT = 1_000_000
 REL_TOL = 0.01
 ABS_TOL_J = 1e-12
 DROP_BELOW_J = 1e-30
+PRINT_REL = 1e-5  # McPAT prints 6 significant digits
 COMPONENTS = ("core", "l1i", "l1d", "l2", "l3")
 
 Runner = Callable[[str], McpatResult]
@@ -172,8 +173,14 @@ def characterize(cfg: PowerConfig, runner: Runner, mcpat_sha: str) -> Coefficien
 
     energy_j: dict[str, dict[str, float]] = {c: {} for c in COMPONENTS}
     for e, ee in zip(events, results):
+        own = EVENTS[e].target
         for c in COMPONENTS:
             v = (ee[c] - e0[c]) / N_EVENT
+            # A cross-component term below McPAT's print floor is rounding
+            # noise (e.g. core = Core - L1I - L1D differences), not energy.
+            floor = PRINT_REL * max(abs(e0[c]), abs(ee[c])) / N_EVENT
+            if c != own and abs(v) < floor:
+                v = 0.0
             if abs(v) >= DROP_BELOW_J:
                 energy_j[c][e] = v
 
@@ -224,8 +231,8 @@ def get_coefficients(cfg: PowerConfig, mcpat_bin: Path,
             return co, path
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    work_root = cache_dir / ".work"
-    work_root.mkdir(exist_ok=True)
+    # Private to this process, so concurrent characterizations never share it.
+    work_root = Path(tempfile.mkdtemp(dir=cache_dir, prefix=".work-"))
 
     def runner(xml_text: str) -> McpatResult:
         wd = Path(tempfile.mkdtemp(dir=work_root))
@@ -247,16 +254,14 @@ def get_coefficients(cfg: PowerConfig, mcpat_bin: Path,
             f"McPAT run {e.event!r} failed; input and McPAT output saved in {d}\n{e}",
             e.event, e.xml_text, e.stdout, e.stderr) from e
     finally:
-        try:
-            work_root.rmdir()
-        except OSError:
-            pass
+        shutil.rmtree(work_root, ignore_errors=True)
 
     fd, tmp = tempfile.mkstemp(dir=cache_dir, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(co.to_json())
         os.replace(tmp, path)
+        os.chmod(path, 0o644)  # mkstemp creates 0600
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise

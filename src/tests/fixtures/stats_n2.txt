@@ -1,4 +1,6 @@
 simSeconds                                   0.000170
+simTicks                                    170485000
+simFreq                                  1000000000000
 board.cache_hierarchy.clusters0.l1dcache.demandHits::total        11574
 board.cache_hierarchy.clusters0.l1dcache.overallHits::total        11574
 board.cache_hierarchy.clusters0.l1dcache.demandMisses::total         2502

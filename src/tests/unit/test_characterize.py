@@ -308,3 +308,76 @@ def test_get_coefficients_file_named_by_cache_key(tmp_path, monkeypatch, fake_bi
     co, p = get_coefficients(base_cfg(), fake_bin, tmp_path)
     h = ch.cache_key(base_cfg(), ch.mcpat_sha256(fake_bin))
     assert p.name == f"{h}.json" and co.config_hash == h
+
+
+# ---- M4: per-process work dir, readable cache file --------------------------
+def test_work_dir_is_private_and_removed(tmp_path, monkeypatch, fake_bin):
+    seen = set()
+    inner = FakeRunner(W)
+
+    def rec(xml, b, wd):
+        seen.add(wd.parent)
+        return inner(xml)
+
+    monkeypatch.setattr(ch, "run_mcpat", rec)
+    cache = tmp_path / "cache"
+    _, p = get_coefficients(base_cfg(), fake_bin, cache)
+    assert len(seen) == 1
+    work = seen.pop()
+    assert work.parent == cache and work.name.startswith(".work-")
+    assert not work.exists()
+    assert not [x for x in cache.iterdir() if x.name.startswith(".work")]
+    assert (p.stat().st_mode & 0o777) == 0o644
+
+
+def test_work_dir_removed_after_failure(tmp_path, monkeypatch, fake_bin):
+    def boom(xml, b, wd):
+        raise McpatError("boom")
+
+    monkeypatch.setattr(ch, "run_mcpat", boom)
+    cache = tmp_path / "cache"
+    with pytest.raises(McpatError):
+        get_coefficients(base_cfg(), fake_bin, cache)
+    assert not [x for x in cache.iterdir() if x.name.startswith(".work")]
+
+
+# ---- M5: cross-component coefficients below McPAT's print floor ------------
+def _cross_runner(delta_core_total):
+    """FakeRunner plus a core-energy delta whenever the L1D sees reads."""
+    inner = FakeRunner(W)
+
+    def run(xml):
+        out = dict(inner(xml))
+        root = ET.fromstring(xml)
+        hit = False
+        for c in root.iter("component"):
+            if c.get("id") == "system.core0.dcache":
+                for s in c.findall("stat"):
+                    if s.get("name") == "read_accesses" and float(s.get("value")) > 0:
+                        hit = True
+        if hit:
+            k = ("System", "Core 0")
+            n = out[k]
+            out[k] = _cp(n.runtime_dynamic_energy_j + delta_core_total,
+                         n.subthreshold_leakage_w)
+        return out
+    return run
+
+
+def test_cross_component_term_below_print_floor_dropped():
+    # core E0 = W_CYC * 2e6 = 7e-7 J -> floor 1e-5 * 7e-7 / 1e6 = 7e-18 J/event
+    co = characterize(base_cfg(), _cross_runner(1e-13), "sha")   # 1e-19 J/event
+    assert "l1d.read_accesses" not in co.energy_j["core"]
+    assert co.energy_j["l1d"]["l1d.read_accesses"] == pytest.approx(W[("l1d", "read_accesses")])
+
+
+def test_cross_component_term_above_print_floor_kept():
+    co = characterize(base_cfg(), _cross_runner(1e-8), "sha")    # 1e-14 J/event
+    assert co.energy_j["core"]["l1d.read_accesses"] == pytest.approx(1e-14, rel=1e-6)
+
+
+def test_own_target_tiny_coefficient_kept():
+    w = dict(W)
+    w[("l1d", "read_accesses")] = 1e-25                         # far below any floor
+    co = characterize(base_cfg(), FakeRunner(w), "sha")
+    assert co.energy_j["l1d"]["l1d.read_accesses"] == pytest.approx(1e-25, rel=1e-3)

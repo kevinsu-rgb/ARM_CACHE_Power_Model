@@ -81,7 +81,7 @@ Or use the wrapper, which also runs `extract_gem5_stats.py` afterwards and write
 bash run_gem5.sh --binary tests/test_sample_arm64 [benchmark args] [options]
 ```
 
-The wrapper accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. Set `PYTHON` to choose the interpreter used for extraction (default `python3`). `src/execute_command` has example invocations.
+The wrapper can be run from any directory (for example `bash src/run_gem5.sh --binary src/tests/test_sample_arm64` from the project root); relative `--binary` and `--outdir` paths are taken relative to the current directory. It accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. Set `GEM5_BIN` to choose the gem5 binary (default `/home/kevin/Projects/gem5/build/ARM/gem5.opt`) and `PYTHON` to choose the interpreter used for extraction (default `python3`). `src/execute_command` has example invocations.
 
 Example with custom cache sizes and a different core:
 
@@ -126,7 +126,7 @@ CPU and power-model options:
 1. McPAT is run at zero activity. Each component's leakage is its static power.
 2. McPAT is run once per event type at 1e6 counts. The difference from the zero-activity run gives the energy per event, for each component (core, L1I, L1D, L2, L3).
 3. A combined run with all events checks that the energies superpose to within 1%.
-4. The results are cached as JSON in `power_cache/`, keyed by a hash of the configuration.
+4. The results are cached as JSON in `power_cache/`, keyed by a hash of the configuration, the McPAT binary, the cache schema and a fingerprint of the generator (the baseline McPAT XML, the event list and the run-size constants), so code changes that alter McPAT's inputs re-characterize automatically. Cross-component energies below McPAT's 6-digit print floor are treated as rounding noise and dropped.
 5. gem5's `MathExprPowerModel` then computes, per component:
    - dynamic W = sum(energy x stat) / simSeconds
    - static W = leakage

@@ -4,10 +4,22 @@
 # GEM5 + main.py run wrapper
 ###############################
 
-# Default paths (you can change these)
-GEM5_BIN=/home/kevin/Projects/gem5/build/ARM/gem5.opt
-MAIN_PY=main.py
+# Paths. The script works from any directory: main.py and
+# extract_gem5_stats.py are found next to this script, and relative
+# --binary/--outdir paths are taken relative to the caller's cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GEM5_BIN="${GEM5_BIN:-/home/kevin/Projects/gem5/build/ARM/gem5.opt}"
+MAIN_PY="$SCRIPT_DIR/main.py"
+EXTRACT_PY="$SCRIPT_DIR/extract_gem5_stats.py"
 PYTHON_BIN="${PYTHON:-python3}"
+
+# Absolute form of a user path, relative to the caller's original cwd.
+abspath() {
+    case "$1" in
+        /*) printf '%s\n' "$1" ;;
+        *)  printf '%s\n' "$PWD/$1" ;;
+    esac
+}
 
 ##########################################
 # Parse arguments with defaults
@@ -61,6 +73,10 @@ usage() {
     echo "Options (with defaults):"
     echo "  --binary <path>                    Path to ARM64 binary (REQUIRED)"
     echo "  --outdir <dir>                     gem5 output directory. Default: m5out"
+    echo ""
+    echo "Relative --binary/--outdir paths are relative to the current directory."
+    echo "Environment: GEM5_BIN (gem5 binary), PYTHON (interpreter for extraction)."
+    echo ""
     echo "  --l1i_size <size>                  Default: 32KiB"
     echo "  --l1i_assoc <int>                  Default: 8"
     echo "  --l1d_size <size>                  Default: 32KiB"
@@ -135,6 +151,11 @@ if [[ -z "$BINARY" ]]; then
     usage
 fi
 
+# Resolve user paths against the caller's cwd before anything else.
+BINARY_NAME="$(basename "$BINARY")"
+BINARY="$(abspath "$BINARY")"
+OUTDIR="$(abspath "$OUTDIR")"
+
 ##########################################
 # Build the GEM5 command
 ##########################################
@@ -197,8 +218,8 @@ fi
 # Extract filtered stats
 ##########################################
 
-"$PYTHON_BIN" extract_gem5_stats.py \
+"$PYTHON_BIN" "$EXTRACT_PY" \
     --stats "$OUTDIR/stats.txt" \
     --out "$OUTDIR/filtered_stats.csv" \
-    --benchmark "$(basename "$BINARY")" \
+    --benchmark "$BINARY_NAME" \
     --benchmark_args "${WORKLOAD_ARGS[*]:-}"

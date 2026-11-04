@@ -68,12 +68,19 @@ class McpatOutput(dict):
 
 
 def find_mcpat_bin(explicit: str | None, project_root: Path) -> Path:
-    """Locate the McPAT binary: explicit, $MCPAT_BIN, then tools/mcpat/mcpat."""
-    candidates = [explicit, os.environ.get("MCPAT_BIN"),
-                  str(Path(project_root) / "tools/mcpat/mcpat")]
-    for c in candidates:
-        if c and Path(c).is_file():
+    """Locate the McPAT binary: explicit, $MCPAT_BIN, then tools/mcpat/mcpat.
+
+    An explicit path or $MCPAT_BIN that is not a file is an error; it does
+    not fall through to the next candidate.
+    """
+    for label, c in (("--mcpat_bin", explicit), ("$MCPAT_BIN", os.environ.get("MCPAT_BIN"))):
+        if c:
+            if not Path(c).is_file():
+                raise McpatNotFound(f"McPAT binary from {label} is not a file: {c}")
             return Path(c)
+    default = Path(project_root) / "tools/mcpat/mcpat"
+    if default.is_file():
+        return default
     gem5_root = os.environ.get("GEM5_ROOT") or DEFAULT_GEM5_ROOT
     raise McpatNotFound(
         "McPAT binary not found. Build it with: "

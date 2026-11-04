@@ -69,6 +69,17 @@ def test_validate_minor(run_gem5, mcpat_bin, project_root, hello, tmp_path):
                     ["--cpu_type", "MINOR", "--num_cores", "1", "--binary", hello])
 
 
+def test_validate_minor_two_cores(run_gem5, mcpat_bin, project_root, hello, tmp_path):
+    _validate_hello(run_gem5, project_root, tmp_path,
+                    ["--cpu_type", "MINOR", "--num_cores", "2", "--binary", hello])
+
+
+def test_validate_o3_neoverse_v2(run_gem5, mcpat_bin, project_root, hello, tmp_path):
+    _validate_hello(run_gem5, project_root, tmp_path,
+                    ["--cpu_type", "O3", "--core_model", "neoverse_v2",
+                     "--num_cores", "1", "--binary", hello])
+
+
 @pytest.mark.slow
 def test_validate_small_loop(run_gem5, mcpat_bin, project_root, tmp_path):
     out = _run(run_gem5, tmp_path, ["--cpu_type", "O3", "--num_cores", "1", "--binary",

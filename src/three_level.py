@@ -70,8 +70,8 @@ class PrivateL1PrivateL2SharedL3CacheHierarchy(AbstractClassicCacheHierarchy):
         self._l3_assoc  = l3_assoc
         self._l1d_replacement_policy = l1d_replacement_policy or "LRURP"
         self._l1i_replacement_policy = l1i_replacement_policy or "LRURP"
-        self._l2_replacement_policy  = l2_replacement_policy or LRURP()
-        self._l3_replacement_policy  = l3_replacement_policy or LRURP()
+        self._l2_replacement_policy  = l2_replacement_policy or "LRURP"
+        self._l3_replacement_policy  = l3_replacement_policy or "LRURP"
 
         # High-bandwidth system crossbar.
         self.membus = SystemXBar(width=64)

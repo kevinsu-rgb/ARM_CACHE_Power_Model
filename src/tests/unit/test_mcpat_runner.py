@@ -98,3 +98,36 @@ def test_run_mcpat_unparseable_output_reports_stdout(tmp_path):
     with pytest.raises(McpatError, match="something odd") as ei:
         run_mcpat("<x/>", b, tmp_path / "wd")
     assert ei.value.stdout.strip() == "something odd"
+
+
+def test_find_bin_explicit_missing_is_not_skipped(tmp_path, monkeypatch):
+    (tmp_path / "tools/mcpat").mkdir(parents=True)
+    (tmp_path / "tools/mcpat/mcpat").write_bytes(b"x")       # fallback exists
+    monkeypatch.delenv("MCPAT_BIN", raising=False)
+    bad = tmp_path / "nope/mcpat"
+    with pytest.raises(McpatNotFound, match=str(bad)):
+        find_mcpat_bin(str(bad), tmp_path)
+
+
+def test_find_bin_env_missing_is_not_skipped(tmp_path, monkeypatch):
+    (tmp_path / "tools/mcpat").mkdir(parents=True)
+    (tmp_path / "tools/mcpat/mcpat").write_bytes(b"x")
+    bad = tmp_path / "env/mcpat"
+    monkeypatch.setenv("MCPAT_BIN", str(bad))
+    with pytest.raises(McpatNotFound, match=r"\$MCPAT_BIN.*" + str(bad)):
+        find_mcpat_bin(None, tmp_path)
+
+
+def test_find_bin_order(tmp_path, monkeypatch):
+    (tmp_path / "tools/mcpat").mkdir(parents=True)
+    fallback = tmp_path / "tools/mcpat/mcpat"
+    fallback.write_bytes(b"x")
+    env = tmp_path / "env_mcpat"
+    env.write_bytes(b"x")
+    explicit = tmp_path / "explicit_mcpat"
+    explicit.write_bytes(b"x")
+    monkeypatch.delenv("MCPAT_BIN", raising=False)
+    assert find_mcpat_bin(None, tmp_path) == fallback
+    monkeypatch.setenv("MCPAT_BIN", str(env))
+    assert find_mcpat_bin(None, tmp_path) == env
+    assert find_mcpat_bin(str(explicit), tmp_path) == explicit
