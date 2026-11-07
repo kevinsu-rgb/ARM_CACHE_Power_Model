@@ -51,7 +51,6 @@ from power.mcpat_runner import (McpatError, McpatResult, find_mcpat_bin,  # noqa
                                 run_mcpat)
 from power.mcpat_xml import build_xml  # noqa: E402
 
-PROJECT_ROOT = _SRC.parent
 CORELESS = ("TIMING", "ATOMIC")
 EPS = 1e-15
 
@@ -271,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         comps = _discover(stats, cfg)
         counts, core_cycles, sys_cyc = counts_from_stats(stats, cfg, comps)
         xml = build_xml(cfg, counts, sys_cyc, core_cycles)
-        mcpat_bin = find_mcpat_bin(args.mcpat_bin, PROJECT_ROOT)
+        mcpat_bin = find_mcpat_bin(args.mcpat_bin)
     except (OSError, KeyError, ValueError, McpatError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

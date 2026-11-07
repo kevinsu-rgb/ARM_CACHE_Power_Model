@@ -26,18 +26,38 @@ All paths are relative to the project root.
 - `src/run_gem5.sh`, `src/execute_command`: wrapper script and example invocations
 - `src/tests/`: unit, end-to-end and slow tests, plus a sample C program
 - `power_cache/`: cached characterization results (created on demand, git-ignored)
-- `tools/mcpat/mcpat`: McPAT binary (built locally, git-ignored)
+- `tools/mcpat/mcpat`: suggested McPAT build location (git-ignored); point `MCPAT_BIN` at it
 
 ## Requirements
 
-- gem5 25.1 with an ARM build at `/home/kevin/Projects/gem5` (binary: `/home/kevin/Projects/gem5/build/ARM/gem5.opt`)
+- gem5 25.1 with an ARM build
 - McPAT, built from gem5's bundled sources into `tools/` (run from the project root):
 
   ```bash
-  make -C /home/kevin/Projects/gem5/ext/mcpat BUILD_DIR=$PWD/tools -j8
+  make -C $GEM5_ROOT/ext/mcpat BUILD_DIR=$PWD/tools -j8
   ```
 
   This produces `tools/mcpat/mcpat`. It is the AMD-refactored McPAT 0.8 that ships with gem5.
+
+### Environment
+
+The project has no built-in tool locations. Set these before running anything (paths are examples):
+
+```bash
+export GEM5_ROOT=/path/to/gem5                      # gem5 checkout
+export GEM5_BIN=$GEM5_ROOT/build/ARM/gem5.opt       # gem5 ARM binary
+export MCPAT_BIN=/path/to/project/tools/mcpat/mcpat # McPAT binary
+export PYTHON=python3                               # interpreter for stats extraction
+```
+
+| Variable | Used by | If missing |
+|---|---|---|
+| `GEM5_ROOT` | `main.py` (O3 and MINOR core configs), McPAT regression tests | `main.py` errors for O3/MINOR unless `--gem5_root` is given |
+| `GEM5_BIN` | `run_gem5.sh`, e2e tests | `run_gem5.sh` errors |
+| `MCPAT_BIN` | `main.py`, `validate_mcpat.py`, `power.characterize` | they error unless `--mcpat_bin` is given |
+| `PYTHON` | `run_gem5.sh` | `run_gem5.sh` errors |
+
+`run_gem5.sh` checks all four before starting gem5, reports every missing or invalid one at once, and passes `GEM5_ROOT` and `MCPAT_BIN` to `main.py` explicitly. Tests that need a variable that is not set are skipped with a warning.
 - A cross-compiler for ARM64 Linux binaries (`aarch64-linux-gnu-gcc` is recommended)
 - A Python environment with `pytest` for the tests
 
@@ -53,14 +73,16 @@ aarch64-linux-gnu-gcc -static -o tests/test_sample_arm64 tests/test_sample.c
 If `aarch64-linux-gnu-gcc` is not available, try:
 
 ```bash
-clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -static -O2 \
+clang --target=aarch64-linux-gnu --sysroot=$AARCH64_SYSROOT -static -O2 \
   -o tests/test_sample_arm64 tests/test_sample.c
 ```
 
-The multithreaded test binary `src/tests/threads_arm64` is gem5's `tests/test-progs/threads` program (source copied to `src/tests/threads.cpp`). It was built from the project root with:
+`$AARCH64_SYSROOT` is the directory holding your aarch64 Linux headers and libraries.
+
+The multithreaded test binary `src/tests/threads_arm64` is gem5's `tests/test-progs/threads` program (source copied to `src/tests/threads.cpp`). To rebuild it, from the project root:
 
 ```bash
-/tools/AMD/2025.2/gnu/aarch64/lin/aarch64-linux/bin/aarch64-linux-gnu-g++ -O2 -static -pthread \
+aarch64-linux-gnu-g++ -O2 -static -pthread \
   -o src/tests/threads_arm64 src/tests/threads.cpp
 ```
 
@@ -71,7 +93,7 @@ Run it with `--num_cores 2` (or more). It exercises cores that are clock-gated f
 From `src/`:
 
 ```bash
-/home/kevin/Projects/gem5/build/ARM/gem5.opt main.py \
+$GEM5_BIN main.py \
   --binary tests/test_sample_arm64
 ```
 
@@ -81,12 +103,12 @@ Or use the wrapper, which also runs `extract_gem5_stats.py` afterwards and write
 bash run_gem5.sh --binary tests/test_sample_arm64 [benchmark args] [options]
 ```
 
-The wrapper can be run from any directory (for example `bash src/run_gem5.sh --binary src/tests/test_sample_arm64` from the project root); relative `--binary` and `--outdir` paths are taken relative to the current directory. It accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. Set `GEM5_BIN` to choose the gem5 binary (default `/home/kevin/Projects/gem5/build/ARM/gem5.opt`) and `PYTHON` to choose the interpreter used for extraction (default `python3`). `src/execute_command` has example invocations.
+The wrapper can be run from any directory (for example `bash src/run_gem5.sh --binary src/tests/test_sample_arm64` from the project root); relative `--binary` and `--outdir` paths are taken relative to the current directory. It accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. It requires `GEM5_ROOT`, `GEM5_BIN`, `MCPAT_BIN` and `PYTHON` (see [Environment](#environment)). `src/execute_command` has example invocations.
 
 Example with custom cache sizes and a different core:
 
 ```bash
-/home/kevin/Projects/gem5/build/ARM/gem5.opt main.py \
+$GEM5_BIN main.py \
   --binary tests/test_sample_arm64 \
   --l1i_size 16KiB --l1d_size 16KiB --l2_size 128KiB --l3_size 1MiB \
   --cpu_type MINOR
@@ -115,8 +137,8 @@ CPU and power-model options:
 | `--tech_node` | `28` | technology node in nm, valid range 22 to 90 |
 | `--device_type` | `LOP` | `HP`, `LOP` or `LSTP` |
 | `--temperature` | `350` | kelvin, 300 to 400 in steps of 10 |
-| `--gem5_root` | `/home/kevin/Projects/gem5` | gem5 checkout (or env `GEM5_ROOT`) |
-| `--mcpat_bin` | `tools/mcpat/mcpat` | McPAT binary |
+| `--gem5_root` | env `GEM5_ROOT` | gem5 checkout |
+| `--mcpat_bin` | env `MCPAT_BIN` | McPAT binary |
 | `--power_cache_dir` | `power_cache/` | characterization cache directory |
 
 ## Power model
@@ -186,7 +208,7 @@ For `src/tests/small_loop` (O3, `o3_arm_v7a`, 1 core, 28 nm LOP, 1 GHz): core dy
 A successful run prints the program output and writes `m5out/stats.txt` and `m5out/power_meta.json`. The wrapper also writes `m5out/filtered_stats.csv`. To produce the CSV by hand, from `src/`:
 
 ```bash
-python3 extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats.csv \
+$PYTHON extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats.csv \
   --benchmark test_sample_arm64 --benchmark_args ""
 ```
 
@@ -195,14 +217,14 @@ python3 extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats
 From `src/`:
 
 ```bash
-python3 validate_mcpat.py --outdir m5out
+$PYTHON validate_mcpat.py --outdir m5out
 ```
 
 This re-runs McPAT on the finished run's real event counts and compares per-component dynamic energy and leakage with gem5's numbers, within `--tolerance` (default 1%). McPAT charges every core its clock term for every system cycle, while gem5 charges it only for the core's own `numCycles`. The validator therefore subtracts `e_cyc x (system_cycles - numCycles_i)` from McPAT's energy on every core row: fully idle cores, cores that were suspended for part of the run, and fully busy cores (where the correction is close to 0). Both the raw and the adjusted McPAT values are printed. Run time is taken as `simTicks / simFreq`, because `simSeconds` is printed with only 6 decimals. Each value gets a print-precision allowance of `1e-5 x |raw McPAT value|` (McPAT prints 6 significant digits) plus gem5's 6-decimal power output (`5e-7 W`, or `5e-7 W x T` for energies). Values where that allowance exceeds a tenth of the tolerance band are flagged `PRECISION-LIMITED` and pass if the difference is within allowance plus tolerance; all other values get no allowance. Measured agreement on the values that are not precision-limited is about 1e-4 (0.01%) on the bundled tests: max 9.8e-5 on hello world (O3 x2, MINOR x1) and 1.2e-4 on the threads program (MINOR x2, O3 x2). The PASS line prints this maximum. `--mcpat_bin` overrides the McPAT binary.
 
 ## Tests
 
-From the project root, with `PY` set to your Python interpreter:
+From the project root, with the [environment](#environment) set and `PY` set to a Python interpreter that has `pytest`:
 
 ```bash
 $PY -m pytest -m "not slow"   # unit + end-to-end; several minutes on a cold cache

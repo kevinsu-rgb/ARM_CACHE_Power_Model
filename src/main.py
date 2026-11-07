@@ -26,15 +26,13 @@ from power.cores import core_params_from_core, load_core_class, resolve_core_mod
 from power.mcpat_runner import McpatError, find_mcpat_bin
 from power.models import attach_power_models
 
-DEFAULT_GEM5_ROOT = "/home/kevin/Projects/gem5"
-
 # ----------------- CLI -----------------
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
     "--binary",
     type=str,
-    default="program_arm64",
+    required=True,
     help="Path to ARM64 binary",
 )
 
@@ -83,14 +81,17 @@ parser.add_argument("--device_type", type=str, default="LOP",
                     choices=sorted(DEVICE_TYPES))
 parser.add_argument("--temperature", type=int, default=350,
                     help="K; McPAT needs 300..400 in steps of 10")
-parser.add_argument("--gem5_root", type=str, default=None)
-parser.add_argument("--mcpat_bin", type=str, default=None)
+parser.add_argument("--gem5_root", type=str, default=None,
+                    help="gem5 checkout (default: $GEM5_ROOT)")
+parser.add_argument("--mcpat_bin", type=str, default=None,
+                    help="McPAT binary (default: $MCPAT_BIN)")
 parser.add_argument("--power_cache_dir", type=str, default=None)
 
 args = parser.parse_args()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-GEM5_ROOT = Path(args.gem5_root or os.environ.get("GEM5_ROOT") or DEFAULT_GEM5_ROOT)
+_gem5_root = args.gem5_root or os.environ.get("GEM5_ROOT")
+GEM5_ROOT = Path(_gem5_root) if _gem5_root else None
 CACHE_DIR = Path(args.power_cache_dir) if args.power_cache_dir else PROJECT_ROOT / "power_cache"
 
 # ----------------- Require ARM -----------------
@@ -107,6 +108,9 @@ except (ConfigError, ValueError) as exc:
 
 # ----------------- CPU -----------------
 if args.cpu_type in ("O3", "MINOR"):
+    if GEM5_ROOT is None:
+        parser.error(f"--cpu_type {args.cpu_type} needs the gem5 checkout: "
+                     "set GEM5_ROOT or pass --gem5_root")
     core_cls = load_core_class(GEM5_ROOT, args.cpu_type, args.core_model)
     processor = BaseCPUProcessor(
         cores=[BaseCPUCore(core=core_cls(cpu_id=i), isa=ISA.ARM)
@@ -173,7 +177,7 @@ if args.cpu_type in ("TIMING", "ATOMIC"):
 
 try:
     coeffs, coeffs_path = get_coefficients(
-        power_cfg, find_mcpat_bin(args.mcpat_bin, PROJECT_ROOT), CACHE_DIR)
+        power_cfg, find_mcpat_bin(args.mcpat_bin), CACHE_DIR)
 except (McpatError, SuperpositionError, OSError) as exc:
     # gem5's embedded interpreter aborts on sys.exit(<str>) (pybind11 cannot
     # cast the code to int), so print the message and exit with an int.

@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     cfg = config_from_dict(json.loads(Path(a.config).read_text()))
     try:
-        _, path = get_coefficients(cfg, find_mcpat_bin(a.mcpat_bin, root), Path(a.cache_dir))
+        _, path = get_coefficients(cfg, find_mcpat_bin(a.mcpat_bin), Path(a.cache_dir))
     except (McpatError, SuperpositionError) as e:
         print(f"error: power characterization failed: {e}", file=sys.stderr)
         return 1

@@ -7,11 +7,16 @@
 # Paths. The script works from any directory: main.py and
 # extract_gem5_stats.py are found next to this script, and relative
 # --binary/--outdir paths are taken relative to the caller's cwd.
+#
+# External tools have no default location; they must be given in the
+# environment (checked below, before anything runs):
+#   GEM5_ROOT  gem5 checkout (ARM core configs live in $GEM5_ROOT/configs)
+#   GEM5_BIN   gem5 ARM binary, e.g. $GEM5_ROOT/build/ARM/gem5.opt
+#   MCPAT_BIN  McPAT binary (see README for the build command)
+#   PYTHON     Python interpreter for stats extraction
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GEM5_BIN="${GEM5_BIN:-/home/kevin/Projects/gem5/build/ARM/gem5.opt}"
 MAIN_PY="$SCRIPT_DIR/main.py"
 EXTRACT_PY="$SCRIPT_DIR/extract_gem5_stats.py"
-PYTHON_BIN="${PYTHON:-python3}"
 
 # Absolute form of a user path, relative to the caller's original cwd.
 abspath() {
@@ -68,14 +73,18 @@ usage() {
     echo "  ./run_gem5.sh --binary <benchmark> [benchmark args] [options]"
     echo ""
     echo "Example:"
-    echo "  ./run_gem5.sh --binary benchmarks/needle/needle 8000 50 1 --l2_size 1MiB"
+    echo "  ./run_gem5.sh --binary tests/test_sample_arm64 --l2_size 1MiB"
     echo ""
     echo "Options (with defaults):"
     echo "  --binary <path>                    Path to ARM64 binary (REQUIRED)"
     echo "  --outdir <dir>                     gem5 output directory. Default: m5out"
     echo ""
     echo "Relative --binary/--outdir paths are relative to the current directory."
-    echo "Environment: GEM5_BIN (gem5 binary), PYTHON (interpreter for extraction)."
+    echo "Required environment (no defaults):"
+    echo "  GEM5_ROOT  gem5 checkout"
+    echo "  GEM5_BIN   gem5 ARM binary, e.g. \$GEM5_ROOT/build/ARM/gem5.opt"
+    echo "  MCPAT_BIN  McPAT binary"
+    echo "  PYTHON     Python interpreter for stats extraction, e.g. python3"
     echo ""
     echo "  --l1i_size <size>                  Default: 32KiB"
     echo "  --l1i_assoc <int>                  Default: 8"
@@ -147,8 +156,43 @@ done
 ##########################################
 
 if [[ -z "$BINARY" ]]; then
-    echo "ERROR: --binary <benchmark> is required."
+    echo "ERROR: --binary <benchmark> is required." >&2
     usage
+fi
+if [[ ! -f "$BINARY" ]]; then
+    echo "ERROR: --binary is not a file: $BINARY" >&2
+    exit 1
+fi
+
+# Every required setting is checked, and all problems are reported at once.
+ERRORS=()
+require_dir() {   # <var name> <description>
+    local v="${!1:-}"
+    if [[ -z "$v" ]]; then ERRORS+=("$1 is not set ($2)")
+    elif [[ ! -d "$v" ]]; then ERRORS+=("$1 is not a directory: $v")
+    fi
+}
+require_exe() {   # <var name> <description>
+    local v="${!1:-}"
+    if [[ -z "$v" ]]; then ERRORS+=("$1 is not set ($2)")
+    elif [[ ! -f "$v" || ! -x "$v" ]]; then ERRORS+=("$1 is not an executable file: $v")
+    fi
+}
+require_dir GEM5_ROOT "gem5 checkout"
+if [[ -n "${GEM5_ROOT:-}" && -d "$GEM5_ROOT" && ! -d "$GEM5_ROOT/configs" ]]; then
+    ERRORS+=("GEM5_ROOT has no configs/ directory, is it a gem5 checkout? $GEM5_ROOT")
+fi
+require_exe GEM5_BIN "gem5 ARM binary, e.g. \$GEM5_ROOT/build/ARM/gem5.opt"
+require_exe MCPAT_BIN "McPAT binary; build it as described in the README"
+if [[ -z "${PYTHON:-}" ]]; then
+    ERRORS+=("PYTHON is not set (interpreter for stats extraction, e.g. python3)")
+elif ! command -v "$PYTHON" >/dev/null 2>&1; then
+    ERRORS+=("PYTHON is not a runnable command: $PYTHON")
+fi
+if [[ ${#ERRORS[@]} -gt 0 ]]; then
+    for e in "${ERRORS[@]}"; do echo "ERROR: $e" >&2; done
+    echo "Set these in your environment; see the README's Requirements section." >&2
+    exit 1
 fi
 
 # Resolve user paths against the caller's cwd before anything else.
@@ -161,6 +205,8 @@ OUTDIR="$(abspath "$OUTDIR")"
 ##########################################
 
 CMD=("$GEM5_BIN" -d "$OUTDIR" "$MAIN_PY"
+  --gem5_root "$GEM5_ROOT"
+  --mcpat_bin "$MCPAT_BIN"
   --binary "$BINARY"
   --l1i_size "$L1I_SIZE"
   --l1i_assoc "$L1I_ASSOC"
@@ -218,7 +264,7 @@ fi
 # Extract filtered stats
 ##########################################
 
-"$PYTHON_BIN" "$EXTRACT_PY" \
+"$PYTHON" "$EXTRACT_PY" \
     --stats "$OUTDIR/stats.txt" \
     --out "$OUTDIR/filtered_stats.csv" \
     --benchmark "$BINARY_NAME" \

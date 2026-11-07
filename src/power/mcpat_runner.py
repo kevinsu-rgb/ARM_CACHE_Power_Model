@@ -8,8 +8,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_GEM5_ROOT = "/home/kevin/Projects/gem5"
-
 _HEADER_RE = re.compile(r"^(\s*)(\S.*?):\s*$")
 _VALUE_RE = re.compile(r"^\s*(.+?)\s*=\s*(\S+)(?:\s+\S+)?\s*$")
 
@@ -67,24 +65,21 @@ class McpatOutput(dict):
     stderr: str = ""
 
 
-def find_mcpat_bin(explicit: str | None, project_root: Path) -> Path:
-    """Locate the McPAT binary: explicit, $MCPAT_BIN, then tools/mcpat/mcpat.
+def find_mcpat_bin(explicit: str | None) -> Path:
+    """Locate the McPAT binary: explicit (--mcpat_bin), else $MCPAT_BIN.
 
-    An explicit path or $MCPAT_BIN that is not a file is an error; it does
-    not fall through to the next candidate.
+    There is no fallback location. Neither set, or a value that is not a
+    file, is an error.
     """
     for label, c in (("--mcpat_bin", explicit), ("$MCPAT_BIN", os.environ.get("MCPAT_BIN"))):
         if c:
             if not Path(c).is_file():
                 raise McpatNotFound(f"McPAT binary from {label} is not a file: {c}")
             return Path(c)
-    default = Path(project_root) / "tools/mcpat/mcpat"
-    if default.is_file():
-        return default
-    gem5_root = os.environ.get("GEM5_ROOT") or DEFAULT_GEM5_ROOT
     raise McpatNotFound(
-        "McPAT binary not found. Build it with: "
-        f"make -C {gem5_root}/ext/mcpat BUILD_DIR={project_root}/tools"
+        "McPAT binary not set: pass --mcpat_bin or set MCPAT_BIN. To build it, "
+        "from the project root: make -C $GEM5_ROOT/ext/mcpat BUILD_DIR=$PWD/tools "
+        "&& export MCPAT_BIN=$PWD/tools/mcpat/mcpat"
     )
 
 

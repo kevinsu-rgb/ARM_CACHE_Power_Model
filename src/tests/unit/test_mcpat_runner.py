@@ -8,7 +8,6 @@ from power.mcpat_runner import (McpatError, McpatNotFound, _require_components,
                                 parse_mcpat_output, run_mcpat)
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures"
-REG = Path("/home/kevin/Projects/gem5/ext/mcpat/regression")
 
 
 def test_parse_test0_tree():
@@ -38,10 +37,14 @@ def test_parse_nan_inf():
     assert r[("System",)].peak_dynamic_w == float("inf")
 
 
-def test_find_bin_missing_message(tmp_path, monkeypatch):
+def test_find_bin_unset_is_error(tmp_path, monkeypatch):
+    # No fallback location, even if a project-local build exists.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "tools/mcpat").mkdir(parents=True)
+    (tmp_path / "tools/mcpat/mcpat").write_bytes(b"x")
     monkeypatch.delenv("MCPAT_BIN", raising=False)
-    with pytest.raises(McpatNotFound, match=r"make -C .*ext/mcpat BUILD_DIR="):
-        find_mcpat_bin(None, tmp_path)
+    with pytest.raises(McpatNotFound, match=r"MCPAT_BIN.*make -C .*ext/mcpat BUILD_DIR="):
+        find_mcpat_bin(None)
 
 
 def test_sha256(tmp_path):
@@ -52,7 +55,8 @@ def test_sha256(tmp_path):
 
 @pytest.mark.mcpat
 @pytest.mark.parametrize("t", [f"test-{i}" for i in range(9)])
-def test_bundled_regressions_match(mcpat_bin, t):
+def test_bundled_regressions_match(mcpat_bin, gem5_root, t):
+    REG = gem5_root / "ext/mcpat/regression"
     ref = REG / t / "region0.out.ref"
     if not ref.exists():
         pytest.skip("no reference output")
@@ -101,33 +105,26 @@ def test_run_mcpat_unparseable_output_reports_stdout(tmp_path):
 
 
 def test_find_bin_explicit_missing_is_not_skipped(tmp_path, monkeypatch):
-    (tmp_path / "tools/mcpat").mkdir(parents=True)
-    (tmp_path / "tools/mcpat/mcpat").write_bytes(b"x")       # fallback exists
-    monkeypatch.delenv("MCPAT_BIN", raising=False)
+    env = tmp_path / "env_mcpat"
+    env.write_bytes(b"x")                                    # env is valid
+    monkeypatch.setenv("MCPAT_BIN", str(env))
     bad = tmp_path / "nope/mcpat"
     with pytest.raises(McpatNotFound, match=str(bad)):
-        find_mcpat_bin(str(bad), tmp_path)
+        find_mcpat_bin(str(bad))
 
 
-def test_find_bin_env_missing_is_not_skipped(tmp_path, monkeypatch):
-    (tmp_path / "tools/mcpat").mkdir(parents=True)
-    (tmp_path / "tools/mcpat/mcpat").write_bytes(b"x")
+def test_find_bin_env_missing_is_error(tmp_path, monkeypatch):
     bad = tmp_path / "env/mcpat"
     monkeypatch.setenv("MCPAT_BIN", str(bad))
     with pytest.raises(McpatNotFound, match=r"\$MCPAT_BIN.*" + str(bad)):
-        find_mcpat_bin(None, tmp_path)
+        find_mcpat_bin(None)
 
 
 def test_find_bin_order(tmp_path, monkeypatch):
-    (tmp_path / "tools/mcpat").mkdir(parents=True)
-    fallback = tmp_path / "tools/mcpat/mcpat"
-    fallback.write_bytes(b"x")
     env = tmp_path / "env_mcpat"
     env.write_bytes(b"x")
     explicit = tmp_path / "explicit_mcpat"
     explicit.write_bytes(b"x")
-    monkeypatch.delenv("MCPAT_BIN", raising=False)
-    assert find_mcpat_bin(None, tmp_path) == fallback
     monkeypatch.setenv("MCPAT_BIN", str(env))
-    assert find_mcpat_bin(None, tmp_path) == env
-    assert find_mcpat_bin(str(explicit), tmp_path) == explicit
+    assert find_mcpat_bin(None) == env
+    assert find_mcpat_bin(str(explicit)) == explicit
