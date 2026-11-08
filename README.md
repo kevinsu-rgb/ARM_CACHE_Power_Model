@@ -41,23 +41,27 @@ All paths are relative to the project root.
 
 ### Environment
 
-The project has no built-in tool locations. Set these before running anything (paths are examples):
+The project has no built-in tool locations. Put them in a `.env` file at the project root (git-ignored), starting from the template:
 
 ```bash
-export GEM5_ROOT=/path/to/gem5                      # gem5 checkout
-export GEM5_BIN=$GEM5_ROOT/build/ARM/gem5.opt       # gem5 ARM binary
-export MCPAT_BIN=/path/to/project/tools/mcpat/mcpat # McPAT binary
-export PYTHON=python3                               # interpreter for stats extraction
+cp .env.example .env   # then edit the three paths
 ```
+
+```bash
+GEM5_ROOT=/path/to/gem5                          # gem5 checkout
+GEM5_BIN=/path/to/gem5/build/ARM/gem5.opt        # gem5 ARM binary
+MCPAT_BIN=/path/to/project/tools/mcpat/mcpat     # McPAT binary
+```
+
+`.env` is loaded by `run_gem5.sh`, `main.py`, `validate_mcpat.py`, `python -m power.characterize` and the tests (`tests/conftest.py`), from the project root whatever the current directory. A variable already exported in the shell takes precedence over `.env`, so `export GEM5_BIN=...` still works for a one-off override. Format: one `KEY=VALUE` per line (an `export ` prefix is allowed), whole-line `#` comments, optional matching quotes around the value; `$VAR` and `~` are not expanded, so use absolute paths. A malformed line is an error that names the file and line.
 
 | Variable | Used by | If missing |
 |---|---|---|
 | `GEM5_ROOT` | `main.py` (O3 and MINOR core configs), McPAT regression tests | `main.py` errors for O3/MINOR unless `--gem5_root` is given |
 | `GEM5_BIN` | `run_gem5.sh`, e2e tests | `run_gem5.sh` errors |
 | `MCPAT_BIN` | `main.py`, `validate_mcpat.py`, `power.characterize` | they error unless `--mcpat_bin` is given |
-| `PYTHON` | `run_gem5.sh` | `run_gem5.sh` errors |
 
-`run_gem5.sh` checks all four before starting gem5, reports every missing or invalid one at once, and passes `GEM5_ROOT` and `MCPAT_BIN` to `main.py` explicitly. Tests that need a variable that is not set are skipped with a warning.
+`run_gem5.sh` checks all three, plus `python3` on `PATH` (it runs stats extraction with the active Python environment), before starting gem5, reports every missing or invalid one at once, and passes `GEM5_ROOT` and `MCPAT_BIN` to `main.py` explicitly. Tests that need a variable that is not set are skipped with a warning.
 - A cross-compiler for ARM64 Linux binaries (`aarch64-linux-gnu-gcc` is recommended)
 - A Python environment with `pytest` for the tests
 
@@ -102,7 +106,7 @@ Or use the wrapper, which also runs `extract_gem5_stats.py` afterwards and write
 bash src/run_gem5.sh --binary tests/test_sample_arm64 [benchmark args] [options]
 ```
 
-The wrapper can be run from any directory; relative `--binary` and `--outdir` paths are taken relative to the current directory. It accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. It requires `GEM5_ROOT`, `GEM5_BIN`, `MCPAT_BIN` and `PYTHON` (see [Environment](#environment)).
+The wrapper can be run from any directory; relative `--binary` and `--outdir` paths are taken relative to the current directory. It accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. It requires `GEM5_ROOT`, `GEM5_BIN` and `MCPAT_BIN` (see [Environment](#environment)), and runs stats extraction with `python3` from the active Python environment.
 
 Example with custom cache sizes and a different core:
 
@@ -207,7 +211,7 @@ For `tests/small_loop` (O3, `o3_arm_v7a`, 1 core, 28 nm LOP, 1 GHz): core dynami
 A successful run prints the program output and writes `m5out/stats.txt` and `m5out/power_meta.json`. The wrapper also writes `m5out/filtered_stats.csv`. To produce the CSV by hand, from the project root:
 
 ```bash
-$PYTHON src/extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats.csv \
+python3 src/extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats.csv \
   --benchmark test_sample_arm64 --benchmark_args ""
 ```
 
@@ -216,16 +220,16 @@ $PYTHON src/extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_s
 From the project root:
 
 ```bash
-$PYTHON src/validate_mcpat.py --outdir m5out
+python3 src/validate_mcpat.py --outdir m5out
 ```
 
 This re-runs McPAT on the finished run's real event counts and compares per-component dynamic energy and leakage with gem5's numbers, within `--tolerance` (default 1%). McPAT charges every core its clock term for every system cycle, while gem5 charges it only for the core's own `numCycles`. The validator therefore subtracts `e_cyc x (system_cycles - numCycles_i)` from McPAT's energy on every core row: fully idle cores, cores that were suspended for part of the run, and fully busy cores (where the correction is close to 0). Both the raw and the adjusted McPAT values are printed. Run time is taken as `simTicks / simFreq`, because `simSeconds` is printed with only 6 decimals. Each value gets a print-precision allowance of `1e-5 x |raw McPAT value|` (McPAT prints 6 significant digits) plus gem5's 6-decimal power output (`5e-7 W`, or `5e-7 W x T` for energies). Values where that allowance exceeds a tenth of the tolerance band are flagged `PRECISION-LIMITED` and pass if the difference is within allowance plus tolerance; all other values get no allowance. Measured agreement on the values that are not precision-limited is about 1e-4 (0.01%) on the bundled tests: max 9.8e-5 on hello world (O3 x2, MINOR x1) and 1.2e-4 on the threads program (MINOR x2, O3 x2). The PASS line prints this maximum. `--mcpat_bin` overrides the McPAT binary.
 
 ## Tests
 
-From the project root, with the [environment](#environment) set and `PY` set to a Python interpreter that has `pytest`:
+From the project root, with the [environment](#environment) set and a Python environment that has `pytest` active:
 
 ```bash
-$PY -m pytest -m "not slow"   # unit + end-to-end; several minutes on a cold cache
-$PY -m pytest                 # everything, including slow tests
+python3 -m pytest -m "not slow"   # unit + end-to-end; several minutes on a cold cache
+python3 -m pytest                 # everything, including slow tests
 ```

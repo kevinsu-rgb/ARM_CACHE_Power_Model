@@ -6,6 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from power.envfile import load_env
+
+# Fill tool locations from <project>/.env before any fixture reads them;
+# variables exported in the shell take precedence.
+load_env()
+
 GEM5_TIMEOUT_S = 1800
 
 

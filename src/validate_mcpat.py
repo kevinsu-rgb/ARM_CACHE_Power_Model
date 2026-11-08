@@ -45,6 +45,7 @@ from extract_gem5_stats import (discover_components, parse_stats_file,  # noqa: 
 from power.characterize import (Coefficients, component_energies,  # noqa: E402
                                 component_leakage)
 from power.config import PowerConfig, config_from_dict  # noqa: E402
+from power.envfile import load_env  # noqa: E402
 from power.events import ActivityCounts  # noqa: E402
 from power.mapping import MAPPING, eval_expression  # noqa: E402
 from power.mcpat_runner import (McpatError, McpatResult, find_mcpat_bin,  # noqa: E402
@@ -263,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     try:
+        load_env()
         meta = json.loads((args.outdir / "power_meta.json").read_text())
         coeffs = Coefficients.from_json(Path(meta["coefficients_path"]).read_text())
         cfg = config_from_dict(coeffs.config)

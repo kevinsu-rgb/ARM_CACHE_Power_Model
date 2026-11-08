@@ -20,11 +20,21 @@ import m5
 from m5.util.convert import toFrequency
 
 from power.characterize import SuperpositionError, get_coefficients
+from power.envfile import EnvFileError, load_env
 from power.config import (DEVICE_TYPES, HPI_FALLBACK_CORE, ConfigError,
                           GeometryError, PowerConfig, validate)
 from power.cores import core_params_from_core, load_core_class, resolve_core_model
 from power.mcpat_runner import McpatError, find_mcpat_bin
 from power.models import attach_power_models
+
+# ----------------- .env -----------------
+# Fill GEM5_ROOT/MCPAT_BIN etc. from <project>/.env; exported variables win.
+try:
+    load_env()
+except (EnvFileError, OSError) as exc:
+    # sys.exit with an int: gem5's embedded interpreter aborts on sys.exit(<str>).
+    print(f"ERROR: {exc}", file=sys.stderr)
+    sys.exit(1)
 
 # ----------------- CLI -----------------
 parser = argparse.ArgumentParser()

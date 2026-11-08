@@ -17,6 +17,7 @@ from typing import Any
 
 from power.config import (SCHEMA_VERSION, PowerConfig, config_from_dict,
                           config_hash, config_to_dict, implied_vdd)
+from power.envfile import EnvFileError, load_env
 from power.events import EVENTS, events_for
 from power.mcpat_runner import (McpatError, McpatResult, find_mcpat_bin,
                                 mcpat_sha256, run_mcpat)
@@ -275,6 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--mcpat_bin", default=None)
     ap.add_argument("--cache_dir", default=str(root / "power_cache"))
     a = ap.parse_args(argv)
+    try:
+        load_env()
+    except (EnvFileError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     cfg = config_from_dict(json.loads(Path(a.config).read_text()))
     try:
         _, path = get_coefficients(cfg, find_mcpat_bin(a.mcpat_bin), Path(a.cache_dir))

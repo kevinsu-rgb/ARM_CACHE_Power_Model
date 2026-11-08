@@ -9,14 +9,44 @@
 # --binary/--outdir paths are taken relative to the caller's cwd.
 #
 # External tools have no default location; they must be given in the
-# environment (checked below, before anything runs):
+# environment or in <project>/.env (template: .env.example). Variables
+# already exported win over .env. Checked below, before anything runs:
 #   GEM5_ROOT  gem5 checkout (ARM core configs live in $GEM5_ROOT/configs)
 #   GEM5_BIN   gem5 ARM binary, e.g. $GEM5_ROOT/build/ARM/gem5.opt
 #   MCPAT_BIN  McPAT binary (see README for the build command)
-#   PYTHON     Python interpreter for stats extraction
+# Stats extraction runs with python3 from PATH, i.e. the active Python
+# environment.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAIN_PY="$SCRIPT_DIR/main.py"
 EXTRACT_PY="$SCRIPT_DIR/extract_gem5_stats.py"
+ENV_FILE="$(dirname "$SCRIPT_DIR")/.env"
+
+# Load KEY=VALUE lines from a .env file without overriding variables that
+# are already set. Same format as src/power/envfile.py: blank lines and
+# '#' comment lines are skipped, an 'export ' prefix is allowed, one pair
+# of matching quotes around the value is removed, nothing is expanded.
+load_env_file() {   # <file>
+    local file="$1" raw line key val n=0
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r raw || [[ -n "$raw" ]]; do
+        n=$((n + 1))
+        line="${raw%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"   # strip leading whitespace
+        line="${line%"${line##*[![:space:]]}"}"   # strip trailing whitespace
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        if [[ ! "$line" =~ ^(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$ ]]; then
+            echo "ERROR: $file:$n: expected KEY=VALUE, got: $raw" >&2
+            exit 1
+        fi
+        key="${BASH_REMATCH[2]}"
+        val="${BASH_REMATCH[3]}"
+        val="${val#"${val%%[![:space:]]*}"}"
+        if [[ ${#val} -ge 2 && "${val:0:1}" == "${val: -1}" && ( "${val:0:1}" == "'" || "${val:0:1}" == '"' ) ]]; then
+            val="${val:1:${#val}-2}"
+        fi
+        [[ -n "${!key+x}" ]] || export "$key=$val"
+    done < "$file"
+}
 
 # Absolute form of a user path, relative to the caller's original cwd.
 abspath() {
@@ -80,11 +110,11 @@ usage() {
     echo "  --outdir <dir>                     gem5 output directory. Default: m5out"
     echo ""
     echo "Relative --binary/--outdir paths are relative to the current directory."
-    echo "Required environment (no defaults):"
+    echo "Required environment (no defaults; may also be set in <project>/.env):"
     echo "  GEM5_ROOT  gem5 checkout"
     echo "  GEM5_BIN   gem5 ARM binary, e.g. \$GEM5_ROOT/build/ARM/gem5.opt"
     echo "  MCPAT_BIN  McPAT binary"
-    echo "  PYTHON     Python interpreter for stats extraction, e.g. python3"
+    echo "Stats extraction uses python3 from the active Python environment."
     echo ""
     echo "  --l1i_size <size>                  Default: 32KiB"
     echo "  --l1i_assoc <int>                  Default: 8"
@@ -164,6 +194,8 @@ if [[ ! -f "$BINARY" ]]; then
     exit 1
 fi
 
+load_env_file "$ENV_FILE"
+
 # Every required setting is checked, and all problems are reported at once.
 ERRORS=()
 require_dir() {   # <var name> <description>
@@ -184,14 +216,12 @@ if [[ -n "${GEM5_ROOT:-}" && -d "$GEM5_ROOT" && ! -d "$GEM5_ROOT/configs" ]]; th
 fi
 require_exe GEM5_BIN "gem5 ARM binary, e.g. \$GEM5_ROOT/build/ARM/gem5.opt"
 require_exe MCPAT_BIN "McPAT binary; build it as described in the README"
-if [[ -z "${PYTHON:-}" ]]; then
-    ERRORS+=("PYTHON is not set (interpreter for stats extraction, e.g. python3)")
-elif ! command -v "$PYTHON" >/dev/null 2>&1; then
-    ERRORS+=("PYTHON is not a runnable command: $PYTHON")
+if ! command -v python3 >/dev/null 2>&1; then
+    ERRORS+=("python3 is not on PATH (activate the project's Python environment)")
 fi
 if [[ ${#ERRORS[@]} -gt 0 ]]; then
     for e in "${ERRORS[@]}"; do echo "ERROR: $e" >&2; done
-    echo "Set these in your environment; see the README's Requirements section." >&2
+    echo "Set these in your environment or in .env; see the README's Requirements section." >&2
     exit 1
 fi
 
@@ -264,7 +294,7 @@ fi
 # Extract filtered stats
 ##########################################
 
-"$PYTHON" "$EXTRACT_PY" \
+python3 "$EXTRACT_PY" \
     --stats "$OUTDIR/stats.txt" \
     --out "$OUTDIR/filtered_stats.csv" \
     --benchmark "$BINARY_NAME" \
