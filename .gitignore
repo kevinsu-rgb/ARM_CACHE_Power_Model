@@ -16,6 +16,9 @@ typings
 # gem5 output
 m5out
 
+# Machine-specific tool locations (template: .env.example)
+.env
+
 # Local build and cache (see README)
 tools/
 power_cache/
