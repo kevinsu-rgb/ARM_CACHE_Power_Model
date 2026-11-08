@@ -36,7 +36,7 @@ def _power(stats_text, path_regex):
 
 @pytest.fixture
 def hello(project_root):
-    return str(project_root / "src/tests/test_sample_arm64")
+    return str(project_root / "tests/test_sample_arm64")
 
 
 # The former steady ~0.19% gap on hello runs was simSeconds' 6-decimal
@@ -83,7 +83,7 @@ def test_validate_o3_neoverse_v2(run_gem5, mcpat_bin, project_root, hello, tmp_p
 @pytest.mark.slow
 def test_validate_small_loop(run_gem5, mcpat_bin, project_root, tmp_path):
     out = _run(run_gem5, tmp_path, ["--cpu_type", "O3", "--num_cores", "1", "--binary",
-                                    str(project_root / "src/tests/small_loop")])
+                                    str(project_root / "tests/small_loop")])
     r = _validate(project_root, out, tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     text = (out / "stats.txt").read_text()
@@ -98,7 +98,7 @@ def test_validate_small_loop(run_gem5, mcpat_bin, project_root, tmp_path):
 
 @pytest.fixture
 def threads(project_root):
-    return str(project_root / "src/tests/threads_arm64")
+    return str(project_root / "tests/threads_arm64")
 
 
 # threads_arm64 on 2 cores leaves core 0 CLK_GATED for part of the run (while

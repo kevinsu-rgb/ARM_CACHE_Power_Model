@@ -23,8 +23,8 @@ All paths are relative to the project root.
 - `src/power/`: McPAT characterization, caching and the power-model builder
 - `src/extract_gem5_stats.py`: turns `stats.txt` into a CSV row
 - `src/validate_mcpat.py`: McPAT cross-check of a finished run
-- `src/run_gem5.sh`, `src/execute_command`: wrapper script and example invocations
-- `src/tests/`: unit, end-to-end and slow tests, plus a sample C program
+- `src/run_gem5.sh`: wrapper script
+- `tests/`: unit, end-to-end and slow tests, plus the ARM64 test programs they run
 - `power_cache/`: cached characterization results (created on demand, git-ignored)
 - `tools/mcpat/mcpat`: suggested McPAT build location (git-ignored); point `MCPAT_BIN` at it
 
@@ -66,7 +66,6 @@ export PYTHON=python3                               # interpreter for stats extr
 From the project root:
 
 ```bash
-cd src
 aarch64-linux-gnu-gcc -static -o tests/test_sample_arm64 tests/test_sample.c
 ```
 
@@ -79,36 +78,36 @@ clang --target=aarch64-linux-gnu --sysroot=$AARCH64_SYSROOT -static -O2 \
 
 `$AARCH64_SYSROOT` is the directory holding your aarch64 Linux headers and libraries.
 
-The multithreaded test binary `src/tests/threads_arm64` is gem5's `tests/test-progs/threads` program (source copied to `src/tests/threads.cpp`). To rebuild it, from the project root:
+The multithreaded test binary `tests/threads_arm64` is gem5's `tests/test-progs/threads` program (source copied to `tests/threads.cpp`). To rebuild it, from the project root:
 
 ```bash
 aarch64-linux-gnu-g++ -O2 -static -pthread \
-  -o src/tests/threads_arm64 src/tests/threads.cpp
+  -o tests/threads_arm64 tests/threads.cpp
 ```
 
 Run it with `--num_cores 2` (or more). It exercises cores that are clock-gated for part of the run.
 
 ## Run a simulation
 
-From `src/`:
+From the project root:
 
 ```bash
-$GEM5_BIN main.py \
+$GEM5_BIN src/main.py \
   --binary tests/test_sample_arm64
 ```
 
 Or use the wrapper, which also runs `extract_gem5_stats.py` afterwards and writes `<outdir>/filtered_stats.csv`:
 
 ```bash
-bash run_gem5.sh --binary tests/test_sample_arm64 [benchmark args] [options]
+bash src/run_gem5.sh --binary tests/test_sample_arm64 [benchmark args] [options]
 ```
 
-The wrapper can be run from any directory (for example `bash src/run_gem5.sh --binary src/tests/test_sample_arm64` from the project root); relative `--binary` and `--outdir` paths are taken relative to the current directory. It accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. It requires `GEM5_ROOT`, `GEM5_BIN`, `MCPAT_BIN` and `PYTHON` (see [Environment](#environment)). `src/execute_command` has example invocations.
+The wrapper can be run from any directory; relative `--binary` and `--outdir` paths are taken relative to the current directory. It accepts `--outdir <dir>` (default `m5out`), passes it to gem5 as `-d`, and exits with gem5's status if the simulation fails. It requires `GEM5_ROOT`, `GEM5_BIN`, `MCPAT_BIN` and `PYTHON` (see [Environment](#environment)).
 
 Example with custom cache sizes and a different core:
 
 ```bash
-$GEM5_BIN main.py \
+$GEM5_BIN src/main.py \
   --binary tests/test_sample_arm64 \
   --l1i_size 16KiB --l1d_size 16KiB --l2_size 128KiB --l3_size 1MiB \
   --cpu_type MINOR
@@ -201,23 +200,23 @@ Not modelled: crossbars and buses, the memory controller, page-table-walker cach
 
 ### Example numbers
 
-For `src/tests/small_loop` (O3, `o3_arm_v7a`, 1 core, 28 nm LOP, 1 GHz): core dynamic is about 0.40 W and core static about 0.46 W; L1D dynamic is about 0.015 W; L3 dynamic is about 0.002 W. These are illustrative outputs of the model, not a claim about real hardware.
+For `tests/small_loop` (O3, `o3_arm_v7a`, 1 core, 28 nm LOP, 1 GHz): core dynamic is about 0.40 W and core static about 0.46 W; L1D dynamic is about 0.015 W; L3 dynamic is about 0.002 W. These are illustrative outputs of the model, not a claim about real hardware.
 
 ## Expected output
 
-A successful run prints the program output and writes `m5out/stats.txt` and `m5out/power_meta.json`. The wrapper also writes `m5out/filtered_stats.csv`. To produce the CSV by hand, from `src/`:
+A successful run prints the program output and writes `m5out/stats.txt` and `m5out/power_meta.json`. The wrapper also writes `m5out/filtered_stats.csv`. To produce the CSV by hand, from the project root:
 
 ```bash
-$PYTHON extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats.csv \
+$PYTHON src/extract_gem5_stats.py --stats m5out/stats.txt --out m5out/filtered_stats.csv \
   --benchmark test_sample_arm64 --benchmark_args ""
 ```
 
 ## Validate against McPAT
 
-From `src/`:
+From the project root:
 
 ```bash
-$PYTHON validate_mcpat.py --outdir m5out
+$PYTHON src/validate_mcpat.py --outdir m5out
 ```
 
 This re-runs McPAT on the finished run's real event counts and compares per-component dynamic energy and leakage with gem5's numbers, within `--tolerance` (default 1%). McPAT charges every core its clock term for every system cycle, while gem5 charges it only for the core's own `numCycles`. The validator therefore subtracts `e_cyc x (system_cycles - numCycles_i)` from McPAT's energy on every core row: fully idle cores, cores that were suspended for part of the run, and fully busy cores (where the correction is close to 0). Both the raw and the adjusted McPAT values are printed. Run time is taken as `simTicks / simFreq`, because `simSeconds` is printed with only 6 decimals. Each value gets a print-precision allowance of `1e-5 x |raw McPAT value|` (McPAT prints 6 significant digits) plus gem5's 6-decimal power output (`5e-7 W`, or `5e-7 W x T` for energies). Values where that allowance exceeds a tenth of the tolerance band are flagged `PRECISION-LIMITED` and pass if the difference is within allowance plus tolerance; all other values get no allowance. Measured agreement on the values that are not precision-limited is about 1e-4 (0.01%) on the bundled tests: max 9.8e-5 on hello world (O3 x2, MINOR x1) and 1.2e-4 on the threads program (MINOR x2, O3 x2). The PASS line prints this maximum. `--mcpat_bin` overrides the McPAT binary.

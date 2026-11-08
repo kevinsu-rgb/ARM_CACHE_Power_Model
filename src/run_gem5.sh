@@ -73,7 +73,7 @@ usage() {
     echo "  ./run_gem5.sh --binary <benchmark> [benchmark args] [options]"
     echo ""
     echo "Example:"
-    echo "  ./run_gem5.sh --binary tests/test_sample_arm64 --l2_size 1MiB"
+    echo "  bash src/run_gem5.sh --binary tests/test_sample_arm64 --l2_size 1MiB   (from the project root)"
     echo ""
     echo "Options (with defaults):"
     echo "  --binary <path>                    Path to ARM64 binary (REQUIRED)"

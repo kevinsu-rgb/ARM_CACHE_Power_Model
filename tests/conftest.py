@@ -1,22 +1,17 @@
 """Shared pytest fixtures."""
 import os
 import subprocess
-import sys
 import warnings
 from pathlib import Path
 
 import pytest
-
-_SRC = Path(__file__).resolve().parents[1]
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
 
 GEM5_TIMEOUT_S = 1800
 
 
 @pytest.fixture(scope="session")
 def project_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="session")

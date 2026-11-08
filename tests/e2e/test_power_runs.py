@@ -19,7 +19,7 @@ def power_stats(stats_text):
 
 @pytest.fixture
 def hello(project_root):
-    return str(project_root / "src/tests/test_sample_arm64")
+    return str(project_root / "tests/test_sample_arm64")
 
 
 @pytest.mark.parametrize("cpu,model,n", [("O3", "o3_arm_v7a", 1), ("O3", "o3_arm_v7a", 2),
